@@ -11,7 +11,7 @@ version **1.0.0**
 
 ```php
 // setup
-$captcha = return (new SimpleCaptcha())
+$captcha = (new SimpleCaptcha())
     ->option('secret_key', 'SECRET_KEY')
     ->option('secret_salt', 'SECRET_SALT_')
     ->option('num_terms', 2)
@@ -24,6 +24,7 @@ $captcha = return (new SimpleCaptcha())
 <!-- use it -->
 
 <form action="/validate" method="post">
+<!-- you can store the captcha hash in the $_SESSION or in $_COOKIE as well -->
 <input type="hidden" name="hash" value="<?php echo $captcha->getHash(); ?>" />
 Compute result <img src="<?php echo $captcha->getCaptcha(); ?>" /> <input type="text" name="answer" value="" />
 <button type="submit">Submit</button>
@@ -33,6 +34,7 @@ Compute result <img src="<?php echo $captcha->getCaptcha(); ?>" /> <input type="
 ```php
 // use it
 $app->on('/validate', function() use ($captcha) {
+    // you can store the captcha hash in the $_SESSION or in $_COOKIE as well
     if ($captcha->validate($_POST['answer'], $_POST['hash']))
     {
     // correct captcha
