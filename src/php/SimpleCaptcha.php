@@ -27,7 +27,7 @@ class SimpleCaptcha
             ->option('secret_key', 'SECRET_KEY')
             ->option('secret_salt', 'SECRET_SALT_')
             ->option('num_terms', 2)
-            ->option('min_term', 0)
+            ->option('min_term', 1)
             ->option('max_term', 20)
             ->option('color', 0x0)
             ->option('background', 0xffffff)
@@ -48,7 +48,6 @@ class SimpleCaptcha
         return $this;
     }
 
-
     public function getCaptcha()
     {
         if (empty($this->captcha)) $this->gen();
@@ -61,11 +60,18 @@ class SimpleCaptcha
         return $this->hmac;
     }
 
+    public function reset()
+    {
+        $this->captcha = null;
+        $this->hmac = null;
+        return $this;
+    }
+
     public function validate($answer = null, $hmac = null)
     {
         if ((null == $answer) || empty($hmac)) return false;
         $algo = function_exists('hash') ? 'sha256' : 'sha1';
-        $hash = hash_hmac($algo, (string)($this->option('secret_salt') ? $this->option('secret_salt') : '') . (string)$answer, $this->option('secret_key'));
+        $hash = hash_hmac($algo, (string)$this->option('secret_salt') . (string)$answer, (string)$this->option('secret_key'));
         return hash_equals($hash, $hmac);
     }
 
@@ -75,13 +81,16 @@ class SimpleCaptcha
         $min = max(0, (int)$this->option('min_term'));
         $max = max(0, (int)$this->option('max_term'));
         $m = strlen((string)$max);
+
         // compute mathematical formula
         $str = ''; $sum = 0;
         for ($i=0; $i<$n; ++$i)
         {
             $x = (int)mt_rand($min, $max);
+            // randomly use plus or minus operator
+            if (($sum > $x) && mt_rand(0, 1)) $x = -$x;
             $sum += $x;
-            $str .= (0 == $i ? '' : '+') . (string)$x;
+            $str .= (0 == $i ? '' : (0 > $x ? '' : '+')) . (string)$x;
         }
 
         // compute hmac hash of formula
@@ -91,7 +100,7 @@ class SimpleCaptcha
         // create captcha image (with some padding)
         $color = (int)$this->option('color');
         $background = (int)$this->option('background');
-        $w = $n*$m*20+20; $h = 16+20; $font = 5;
+        $w = ($n*$m+$n-1)*10+20; $h = 16+20; $font = 5;
         $img = imagecreate($w, $h);
         $bg = imagecolorallocate($img, ($background >> 16) & 0xff, ($background >> 8) & 0xff, $background & 0xff);
         // Write the string, with some padding

@@ -12,9 +12,10 @@ tico('http://localhost:8000', ROOT)
         return (new SimpleCaptcha())
             ->option('secret_key', 'SECRET_KEY')
             ->option('secret_salt', 'SECRET_SALT_')
-            ->option('num_terms', 2)
+            ->option('num_terms', 3)
             ->option('min_term', 1)
             ->option('max_term', 21)
+            ->reset()
         ;
     })
     ->on('*', '/', function() {

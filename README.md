@@ -17,6 +17,7 @@ $captcha = (new SimpleCaptcha())
     ->option('num_terms', 2)
     ->option('min_term', 1)
     ->option('max_term', 21)
+    ->reset()
 ;
 ```
 
