@@ -121,7 +121,8 @@ class SimpleCaptcha
         $fw = imagefontwidth($font);
         $fh = imagefontheight($font);
         $w = strlen($str) * $fw + 25;
-        $h = $fh + 25;
+        $h = $fh + 20;
+        if (1 < $difficulty) $h += 5;
         $img = imagecreate($w, $h);
         $bg = imagecolorallocate($img, ($background >> 16) & 0xff, ($background >> 8) & 0xff, $background & 0xff);
         $c1 = imagecolorallocate($img, ($color1 >> 16) & 0xff, ($color1 >> 8) & 0xff, $color1 & 0xff);
@@ -137,14 +138,14 @@ class SimpleCaptcha
                 for ($i=0; $i<$n; ++$i)
                 {
                     $str = $nums[$i];
-                    imagestring($img, $font, $sum*$fw+12, mt_rand(0, 1) ? 10 : 15, $str, mt_rand(0, 1) ? $c2 : $c1);
+                    imagestring($img, $font, $sum*$fw+12, mt_rand(0, 1) ? 10 : 14, $str, mt_rand(0, 1) ? $c2 : $c1);
                     $sum += strlen($str);
                 }
                 break;
             case 2: // medium
                 $updown = mt_rand(0, 1);
-                imagestring($img, $font, 10, $updown ? 15 : 10, $str1, $c1);
-                imagestring($img, $font, strlen($str1)*$fw+12, $updown ? 10 : 15, $str2, $c2);
+                imagestring($img, $font, 10, $updown ? 13 : 10, $str1, $c1);
+                imagestring($img, $font, strlen($str1)*$fw+12, $updown ? 10 : 13, $str2, $c2);
                 break;
             case 1: // easy
             default:
