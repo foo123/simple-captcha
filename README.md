@@ -1,8 +1,8 @@
 # simple-captcha
 
-Simple, image-based, mathematical captcha
+Simple, image-based, mathematical captcha, with increasing levels of difficulty
 
-version **1.0.0**
+version **1.1.0**
 
 ![SimpleCaptcha](/simple-captcha.jpg)
 
@@ -14,9 +14,13 @@ version **1.0.0**
 $captcha = (new SimpleCaptcha())
     ->option('secret_key', 'SECRET_KEY')
     ->option('secret_salt', 'SECRET_SALT_')
+    ->option('difficulty', 1) // 1 (easy) to 3 (difficult)
     ->option('num_terms', 2)
     ->option('min_term', 1)
     ->option('max_term', 21)
+    ->option('color', 0x121212) // text color
+    ->option('color2', 0x717171) // secondary text color
+    ->option('background', 0xffffff) // background color
     ->reset()
 ;
 ```
