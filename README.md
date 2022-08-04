@@ -2,7 +2,7 @@
 
 Simple, image-based, mathematical captcha, with increasing levels of difficulty
 
-version **1.1.0**
+version **1.2.0**
 
 ![SimpleCaptcha](/simple-captcha.jpg)
 
@@ -38,7 +38,6 @@ $captcha = (new SimpleCaptcha())
     ->option('min_term', 1)
     ->option('max_term', 21)
     ->option('color', 0x121212) // text color
-    ->option('color2', 0x717171) // secondary text color
     ->option('background', 0xffffff) // background color
     ->reset()
 ;
