@@ -31,7 +31,7 @@ function createHash(key, data)
     return require('crypto').createHmac('sha256', key).update(data).digest('hex');
 }
 
-async function imagepng(img, w, h, metaData)
+async function imagepng(img, width, height, metaData)
 {
     metaData = metaData || {};
     var packer = new Packer(metaData);
@@ -41,10 +41,10 @@ async function imagepng(img, w, h, metaData)
     chunks.push(Buffer.from(constants.PNG_SIGNATURE));
 
     // Header
-    chunks.push(packer.packIHDR(w, h));
+    chunks.push(packer.packIHDR(width, height));
     if (metaData.gamma) chunks.push(packer.packGAMA(metaData.gamma));
 
-    var filteredData = packer.filterData(Buffer.from(img), w, h);
+    var filteredData = packer.filterData(Buffer.from(img), width, height);
 
     // compress it
     var deflateOpts = packer.getDeflateOptions();
@@ -57,7 +57,7 @@ async function imagepng(img, w, h, metaData)
     // End
     chunks.push(packer.packIEND());
 
-    return 'data:image/png;base64,' + Buffer.concat(chunks).toString('base64');
+    return Buffer.concat(chunks);
 }
 
 class SimpleCaptcha
@@ -115,7 +115,7 @@ class SimpleCaptcha
 
     validate(answer = null, hmac = null) {
         if ((null == answer) || (null == hmac)) return false;
-        hash = createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(answer));
+        var hash = createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(answer));
         return hash === hmac;
     }
 
@@ -139,7 +139,7 @@ class SimpleCaptcha
         [captcha, width, height] = this.image(formula, color, background, difficulty);
 
         // output image
-        this.captcha = await imagepng(captcha, width, height);
+        this.captcha = 'data:image/png;base64,' + (await imagepng(captcha, width, height)).toString('base64');
 
         return this;
     }
@@ -245,7 +245,7 @@ class SimpleCaptcha
             x0 += cw + space;
         }
 
-        // create distorted GD image based on difficulty level
+        // create distorted image data based on difficulty level
         img = new Uint8Array(4*wh);
         phase = rand(0, 2) * 3.14 / 2.0;
         amplitude = 3 == difficulty ? 5.0 : (2 == difficulty ? 3.0 : 1.5);
