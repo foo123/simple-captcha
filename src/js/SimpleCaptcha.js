@@ -19,45 +19,89 @@ else if (!(name in root)) /* Browser/WebWorker/.. */
     /* module factory */        function ModuleFactory__SimpleCaptcha(undef) {
 "use strict";
 
-var HAS = Object.prototype.hasOwnProperty;
+var HAS = Object.prototype.hasOwnProperty,
+    toString = Object.prototype.toString,
+    isNode = ("undefined" !== typeof global) && ("[object global]" === toString.call(global)),
+    isBrowser = ("undefined" !== typeof window) && ("[object Window]" === toString.call(window))
+;
 
 function rand(m, M)
 {
     return Math.round(m + (M-m)*Math.random());
 }
 
-function createHash(key, data)
+async function createHash(key, data)
 {
-    return require('crypto').createHmac('sha256', key).update(data).digest('hex');
+    var hmac = '';
+    if (isNode)
+    {
+        try {
+            hmac = require('crypto').createHmac('sha256', key).update(data).digest('hex');
+        } catch (e) {
+            hmac = String(data);
+        }
+    }
+    else if (isBrowser)
+    {
+        try {
+            hmac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', (new TextEncoder()).encode(data)))).map(function(b) {return b.toString(16).padStart(2, '0');}).join('');
+        } catch (e) {
+            hmac = String(data);
+        }
+    }
+    else
+    {
+        hmac = String(data);
+    }
+    return hmac;
 }
 
 async function imagepng(img, width, height, metaData)
 {
     metaData = metaData || {};
-    var packer = new Packer(metaData);
-    var chunks = [];
+    if (isNode)
+    {
+        var packer = new Packer(metaData);
+        var chunks = [];
 
-    // Signature
-    chunks.push(Buffer.from(constants.PNG_SIGNATURE));
+        // Signature
+        chunks.push(Buffer.from(constants.PNG_SIGNATURE));
 
-    // Header
-    chunks.push(packer.packIHDR(width, height));
-    if (metaData.gamma) chunks.push(packer.packGAMA(metaData.gamma));
+        // Header
+        chunks.push(packer.packIHDR(width, height));
+        if (metaData.gamma) chunks.push(packer.packGAMA(metaData.gamma));
 
-    var filteredData = packer.filterData(Buffer.from(img), width, height);
+        var filteredData = packer.filterData(Buffer.from(img), width, height);
 
-    // compress it
-    var deflateOpts = packer.getDeflateOptions();
-    var compressedData = await zlib_deflate(filteredData, deflateOpts.level, deflateOpts.chuckSize);
-    filteredData = null;
+        // compress it
+        var deflateOpts = packer.getDeflateOptions();
+        var compressedData = await zlib_deflate(filteredData, deflateOpts.level, deflateOpts.chuckSize);
+        filteredData = null;
 
-    if (!compressedData || !compressedData.length) throw new Error('bad png - invalid compressed data response');
-    chunks.push(packer.packIDAT(Buffer.from(compressedData)));
+        if (!compressedData || !compressedData.length) throw new Error('bad png - invalid compressed data response');
+        chunks.push(packer.packIDAT(Buffer.from(compressedData)));
 
-    // End
-    chunks.push(packer.packIEND());
+        // End
+        chunks.push(packer.packIEND());
 
-    return Buffer.concat(chunks);
+        return 'data:image/png;base64,' + Buffer.concat(chunks).toString('base64');
+    }
+    else if (isBrowser)
+    {
+        var canvas = document.createElement('canvas'),
+            ctx = canvas.getContext('2d'), imgData;
+
+        canvas.width = width;
+        canvas.height = height;
+
+        ctx.createImageData(width, height);
+        imgData = ctx.getImageData(0, 0, width, height);
+        imgData.data.set(img, 0);
+        ctx.putImageData(imgData, 0, 0);
+
+        return canvas.toDataURL('image/png');
+    }
+    return '';
 }
 
 class SimpleCaptcha
@@ -113,9 +157,9 @@ class SimpleCaptcha
         return this;
     }
 
-    validate(answer = null, hmac = null) {
+    async validate(answer = null, hmac = null) {
         if ((null == answer) || (null == hmac)) return false;
-        var hash = createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(answer));
+        var hash = await createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(answer));
         return hash === hmac;
     }
 
@@ -133,13 +177,13 @@ class SimpleCaptcha
         [formula, result] = this.formula(num_terms, min_term, max_term, difficulty);
 
         // compute hmac of result
-        this.hmac = createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(result));
+        this.hmac = await createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(result));
 
         // create image captcha with formula depending on difficulty
         [captcha, width, height] = this.image(formula, color, background, difficulty);
 
         // output image
-        this.captcha = 'data:image/png;base64,' + (await imagepng(captcha, width, height)).toString('base64');
+        this.captcha = await imagepng(captcha, width, height);
 
         return this;
     }
