@@ -1,8 +1,8 @@
 # simple-captcha
 
-Simple, image-based, mathematical captcha, with increasing levels of difficulty
+Simple, image-based, mathematical captcha, with increasing levels of difficulty for PHP, JavaScript, Python
 
-version **1.2.0**
+version **2.0.0**
 
 ![SimpleCaptcha](/simple-captcha.jpg)
 
