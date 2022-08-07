@@ -32,7 +32,17 @@ class SimpleCaptcha:
         self.captcha = None
         self.hmac = None
         self.opts = {}
-        self.option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('difficulty', 1).option('num_terms', 2).option('min_term', 1).option('max_term', 20).option('has_multiplication', True).option('has_division', True).option('color', 0x121212).option('background', 0xffffff)
+        self.option('secret_key', 'SECRET_KEY')
+        self.option('secret_salt', 'SECRET_SALT_')
+        self.option('difficulty', 1) # 1 (easy) to 3 (difficult)
+        self.option('num_terms', 2) # default
+        self.option('min_term', 1) # default
+        self.option('max_term', 20) # default
+        self.option('has_multiplication', True) # default
+        self.option('has_division', True) # default
+        self.option('has_equal_sign', True) # default
+        self.option('color', 0x121212) # text color
+        self.option('background', 0xffffff) # background color
 
     def option(self, *args):
         nargs = len(args)
@@ -65,16 +75,17 @@ class SimpleCaptcha:
 
     def generate(self):
         difficulty = min(3, max(1, int(self.option('difficulty'))));
-        num_terms = max(2, int(self.option('num_terms')))
+        num_terms = max(1, int(self.option('num_terms')))
         min_term = max(0, int(self.option('min_term')))
         max_term = max(0, int(self.option('max_term')))
         has_mult = bool(self.option('has_multiplication'))
         has_div = bool(self.option('has_division'))
+        has_equal = bool(self.option('has_equal_sign'))
         color = int(self.option('color'))
         background = int(self.option('background'))
 
         # generate mathematical formula
-        formula, result = self.formula(num_terms, min_term, max_term, has_mult, has_div, difficulty)
+        formula, result = self.formula(num_terms, min_term, max_term, has_mult, has_div, has_equal, difficulty)
 
         # compute hmac of result
         self.hmac = createHash(str(self.option('secret_key')), str(self.option('secret_salt') if self.option('secret_salt') else '') + str(result))
@@ -87,7 +98,7 @@ class SimpleCaptcha:
 
         return self
 
-    def formula(self, terms, min, max, has_mult, has_div, difficulty):
+    def formula(self, terms, min, max, has_mult, has_div, has_equal, difficulty):
         # generate mathematical formula
         formula = []
         result = 0
@@ -99,12 +110,12 @@ class SimpleCaptcha:
             if (result > x) and rand(0, 1):
                 # randomly use plus or minus operator
                 x = -x
-            elif has_mult and (1 < difficulty) and (x <= 10) and rand(0, 1):
+            elif has_mult and (x <= 10) and rand(0, 1):
                 # randomly use multiplication factor
                 factor = rand(2, 3)
-            elif has_div and (1 < difficulty) and (0 == x % 2) and rand(0, 1):
+            elif has_div and (0 == x % 2) and rand(0, 1):
                 # randomly use division factor
-                divider = 2
+                divider = rand(2, 3) if 0 == x % 6 else 2
 
             if 0 < factor:
                 result += x * factor
@@ -120,7 +131,7 @@ class SimpleCaptcha:
                     formula.extend(split(factor))
 
             elif 0 < divider:
-                result += floor(x / divider)
+                result += math.floor(x / divider)
                 if 0 > x:
                     formula.append('-')
                     formula.extend(split(abs(x)))
@@ -143,6 +154,10 @@ class SimpleCaptcha:
 
             factor = 0
             divider = 0
+
+        if has_equal:
+            formula.append('=')
+            formula.append('?')
 
         return (formula, result)
 
@@ -3392,7 +3407,7 @@ class PNGPacker:
         return self._packChunk('IHDR', IHDR)
 
     def packGAMA(self, gamma):
-        return self._packChunk('gAMA', I4(floor(float(gamma) * GAMMA_DIVISION)))
+        return self._packChunk('gAMA', I4(math.floor(float(gamma) * GAMMA_DIVISION)))
 
     def packIDAT(self, data):
         return self._packChunk('IDAT', data)

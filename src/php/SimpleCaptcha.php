@@ -23,18 +23,17 @@ class SimpleCaptcha
         $this->captcha = null;
         $this->hmac = null;
         $this->opts = array();
-        $this
-            ->option('secret_key', 'SECRET_KEY')
-            ->option('secret_salt', 'SECRET_SALT_')
-            ->option('difficulty', 1) // 1 (easy) to 3 (difficult)
-            ->option('num_terms', 2)
-            ->option('min_term', 1)
-            ->option('max_term', 20)
-            ->option('has_multiplication', true)
-            ->option('has_division', true)
-            ->option('color', 0x121212) // text color
-            ->option('background', 0xffffff) // background color
-        ;
+        $this->option('secret_key', 'SECRET_KEY');
+        $this->option('secret_salt', 'SECRET_SALT_');
+        $this->option('difficulty', 1); // 1 (easy) to 3 (difficult)
+        $this->option('num_terms', 2); // default
+        $this->option('min_term', 1); // default
+        $this->option('max_term', 20); // default
+        $this->option('has_multiplication', true); // default
+        $this->option('has_division', true); // default
+        $this->option('has_equal_sign', true); // default
+        $this->option('color', 0x121212); // text color
+        $this->option('background', 0xffffff); // background color
     }
 
     public function option($key, $val = null)
@@ -81,16 +80,17 @@ class SimpleCaptcha
     private function generate()
     {
         $difficulty = min(3, max(1, (int)$this->option('difficulty')));
-        $num_terms = max(2, (int)$this->option('num_terms'));
+        $num_terms = max(1, (int)$this->option('num_terms'));
         $min_term = max(0, (int)$this->option('min_term'));
         $max_term = max(0, (int)$this->option('max_term'));
         $has_mult = (bool)$this->option('has_multiplication');
         $has_div = (bool)$this->option('has_division');
+        $has_equal = (bool)$this->option('has_equal_sign');
         $color = (int)$this->option('color');
         $background = (int)$this->option('background');
 
         // generate mathematical formula
-        list($formula, $result) = $this->formula($num_terms, $min_term, $max_term, $has_mult, $has_div, $difficulty);
+        list($formula, $result) = $this->formula($num_terms, $min_term, $max_term, $has_mult, $has_div, $has_equal, $difficulty);
 
         // compute hmac of result
         $algo = function_exists('hash') ? 'sha256' : 'sha1';
@@ -109,7 +109,7 @@ class SimpleCaptcha
         return $this;
     }
 
-    private function formula($terms, $min, $max, $has_mult, $has_div, $difficulty)
+    private function formula($terms, $min, $max, $has_mult, $has_div, $has_equal, $difficulty)
     {
         // generate mathematical formula
         $formula = array();
@@ -124,15 +124,15 @@ class SimpleCaptcha
                 // randomly use plus or minus operator
                 $x = -$x;
             }
-            elseif ($has_mult && (1 < $difficulty) && ($x <= 10) && mt_rand(0, 1))
+            elseif ($has_mult && ($x <= 10) && mt_rand(0, 1))
             {
                 // randomly use multiplication factor
                 $factor = (int)mt_rand(2, 3);
             }
-            elseif ($has_div && (1 < $difficulty) && (0 == $x % 2) && mt_rand(0, 1))
+            elseif ($has_div && (0 == $x % 2) && mt_rand(0, 1))
             {
                 // randomly use division factor
-                $divider = 2;
+                $divider = (int)(0 == $x % 6 ? mt_rand(2, 3) : 2);
             }
             if (0 < $factor)
             {
@@ -186,6 +186,11 @@ class SimpleCaptcha
             }
             $factor = 0;
             $divider = 0;
+        }
+        if ($has_equal)
+        {
+            $formula[] = '=';
+            $formula[] = '?';
         }
         return array($formula, $result);
     }

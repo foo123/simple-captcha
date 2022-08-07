@@ -1,6 +1,7 @@
 <?php $this->extend('content.tpl.php'); ?>
 
 <?php $this->start('content'); ?>
+<?php tico()->get('captcha')->reset(); ?>
 <p><b>SimpleCaptcha w/ Tico</b> Index page</p>
 <form method="post">
 <input id="hash" name="hash" type="hidden" value="<?php echo tico()->get('captcha')->getHash(); ?>" />

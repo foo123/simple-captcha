@@ -13,12 +13,14 @@ tico('http://localhost:8000', ROOT)
             ->option('secret_key', 'SECRET_KEY')
             ->option('secret_salt', 'SECRET_SALT_')
             ->option('difficulty', 2)
-            ->option('num_terms', 3)
+            ->option('num_terms', 2)
             ->option('min_term', 1)
             ->option('max_term', 21)
+            ->option('has_multiplication', true)
+            ->option('has_division', true)
+            ->option('has_equal_sign', true)
             ->option('color', 0x121212)
             ->option('background', 0xffffff)
-            ->reset()
         ;
     })
     ->on('*', '/', function() {
@@ -39,6 +41,7 @@ tico('http://localhost:8000', ROOT)
     })
     ->on('*', '/captcha-refresh', function() {
 
+        tico()->get('captcha')->reset();
         tico()->output(
             array(
                 'captcha' => tico()->get('captcha')->getCaptcha(),

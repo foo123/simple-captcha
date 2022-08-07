@@ -93,18 +93,17 @@ class SimpleCaptcha
         this.captcha = null;
         this.hmac = null;
         this.opts = {};
-        this
-            .option('secret_key', 'SECRET_KEY')
-            .option('secret_salt', 'SECRET_SALT_')
-            .option('difficulty', 1) // 1 (easy) to 3 (difficult)
-            .option('num_terms', 2)
-            .option('min_term', 1)
-            .option('max_term', 20)
-            .option('has_multiplication', true)
-            .option('has_division', true)
-            .option('color', 0x121212) // text color
-            .option('background', 0xffffff) // background color
-        ;
+        this.option('secret_key', 'SECRET_KEY');
+        this.option('secret_salt', 'SECRET_SALT_');
+        this.option('difficulty', 1); // 1 (easy) to 3 (difficult)
+        this.option('num_terms', 2); // default
+        this.option('min_term', 1); // default
+        this.option('max_term', 20); // default
+        this.option('has_multiplication', true); // default
+        this.option('has_division', true); // default
+        this.option('has_equal_sign', true); // default
+        this.option('color', 0x121212); // text color
+        this.option('background', 0xffffff); // background color
     }
 
     option(key, val = null) {
@@ -144,18 +143,19 @@ class SimpleCaptcha
 
     async generate() {
         var difficulty = Math.min(3, Math.max(1, parseInt(this.option('difficulty')))),
-            num_terms = Math.max(2, parseInt(this.option('num_terms'))),
+            num_terms = Math.max(1, parseInt(this.option('num_terms'))),
             min_term = Math.max(0, parseInt(this.option('min_term'))),
             max_term = Math.max(0, parseInt(this.option('max_term'))),
             has_mult = !!this.option('has_multiplication'),
             has_div = !!this.option('has_division'),
+            has_equal = !!this.option('has_equal_sign'),
             color = parseInt(this.option('color')),
             background = parseInt(this.option('background')),
             formula, result, captcha, width, height
         ;
 
         // generate mathematical formula
-        [formula, result] = this.formula(num_terms, min_term, max_term, has_mult, has_div, difficulty);
+        [formula, result] = this.formula(num_terms, min_term, max_term, has_mult, has_div, has_equal, difficulty);
 
         // compute hmac of result
         this.hmac = await createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(result));
@@ -169,7 +169,7 @@ class SimpleCaptcha
         return this;
     }
 
-    formula(terms, min, max, has_mult, has_div, difficulty) {
+    formula(terms, min, max, has_mult, has_div, has_equal, difficulty) {
         // generate mathematical formula
         var formula = [], result = 0, factor = 0, divider = 0, i, x;
         for (i=0; i<terms; ++i)
@@ -180,15 +180,15 @@ class SimpleCaptcha
                 // randomly use plus or minus operator
                 x = -x;
             }
-            else if (has_mult && (1 < difficulty) && (x <= 10) && rand(0, 1))
+            else if (has_mult && (x <= 10) && rand(0, 1))
             {
                 // randomly use multiplication factor
                 factor = rand(2, 3);
             }
-            else if (has_div && (1 < difficulty) && (0 === x % 2) && rand(0, 1))
+            else if (has_div && (0 === x % 2) && rand(0, 1))
             {
                 // randomly use division factor
-                divider = 2;
+                divider = 0 === x % 6 ? rand(2, 3) : 2;
             }
             if (0 < factor)
             {
@@ -242,6 +242,11 @@ class SimpleCaptcha
             }
             factor = 0;
             divider = 0;
+        }
+        if (has_equal)
+        {
+            formula.push('=');
+            formula.push('?');
         }
         return [formula, result];
     }
@@ -3690,9 +3695,9 @@ class PNGPacker
             filterSumAvg,
             filterSumPaeth
         ];
-        var filterTypes;
+        var filterTypes = [0]; // use default to match with python version
 
-        if ((null == this._options.filterType) || (-1 === this._options.filterType))
+        /*if ((null == this._options.filterType) || (-1 === this._options.filterType))
         {
             filterTypes = [0, 1, 2, 3, 4];
         }
@@ -3703,7 +3708,7 @@ class PNGPacker
         else
         {
             throw new Error('unrecognised filter types');
-        }
+        }*/
 
         var bpp = COLORTYPE_TO_BPP_MAP[this._options.colorType],
             byteWidth = width * bpp,

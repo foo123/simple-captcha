@@ -23,7 +23,9 @@ else:
     pass
 
 def test():
-    captcha = SimpleCaptcha().option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('difficulty', 2).option('num_terms', 3).option('min_term', 1).option('max_term', 21).option('color', 0x121212).option('background', 0xffffff).reset()
+    captcha = SimpleCaptcha().option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('difficulty', 2).option('num_terms', 2).option('min_term', 1).option('max_term', 21).option('color', 0x121212).option('background', 0xffffff)
+
+    captcha.reset()
 
     print(captcha.getCaptcha())
     print("\n")
