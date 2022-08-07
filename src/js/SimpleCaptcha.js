@@ -61,30 +61,7 @@ async function imagepng(img, width, height, metaData)
     metaData = metaData || {};
     if (isNode)
     {
-        var packer = new Packer(metaData);
-        var chunks = [];
-
-        // Signature
-        chunks.push(Buffer.from(constants.PNG_SIGNATURE));
-
-        // Header
-        chunks.push(packer.packIHDR(width, height));
-        if (metaData.gamma) chunks.push(packer.packGAMA(metaData.gamma));
-
-        var filteredData = packer.filterData(Buffer.from(img), width, height);
-
-        // compress it
-        var deflateOpts = packer.getDeflateOptions();
-        var compressedData = await zlib_deflate(filteredData, deflateOpts.level, deflateOpts.chuckSize);
-        filteredData = null;
-
-        if (!compressedData || !compressedData.length) throw new Error('bad png - invalid compressed data response');
-        chunks.push(packer.packIDAT(Buffer.from(compressedData)));
-
-        // End
-        chunks.push(packer.packIEND());
-
-        return 'data:image/png;base64,' + Buffer.concat(chunks).toString('base64');
+        return 'data:image/png;base64,' + (await (new PNGPacker(metaData)).toPNG(img, width, height)).toString('base64');
     }
     else if (isBrowser)
     {
@@ -123,6 +100,8 @@ class SimpleCaptcha
             .option('num_terms', 2)
             .option('min_term', 1)
             .option('max_term', 20)
+            .option('has_multiplication', true)
+            .option('has_division', true)
             .option('color', 0x121212) // text color
             .option('background', 0xffffff) // background color
         ;
@@ -168,13 +147,15 @@ class SimpleCaptcha
             num_terms = Math.max(2, parseInt(this.option('num_terms'))),
             min_term = Math.max(0, parseInt(this.option('min_term'))),
             max_term = Math.max(0, parseInt(this.option('max_term'))),
+            has_mult = !!this.option('has_multiplication'),
+            has_div = !!this.option('has_division'),
             color = parseInt(this.option('color')),
             background = parseInt(this.option('background')),
             formula, result, captcha, width, height
         ;
 
         // generate mathematical formula
-        [formula, result] = this.formula(num_terms, min_term, max_term, difficulty);
+        [formula, result] = this.formula(num_terms, min_term, max_term, has_mult, has_div, difficulty);
 
         // compute hmac of result
         this.hmac = await createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(result));
@@ -188,9 +169,9 @@ class SimpleCaptcha
         return this;
     }
 
-    formula(terms, min, max, difficulty) {
+    formula(terms, min, max, has_mult, has_div, difficulty) {
         // generate mathematical formula
-        var formula = [], result = 0, factor = 0, i, x;
+        var formula = [], result = 0, factor = 0, divider = 0, i, x;
         for (i=0; i<terms; ++i)
         {
             x = rand(min, max);
@@ -199,10 +180,15 @@ class SimpleCaptcha
                 // randomly use plus or minus operator
                 x = -x;
             }
-            else if ((1 < difficulty) && (x <= 5) && rand(0, 1))
+            else if (has_mult && (1 < difficulty) && (x <= 10) && rand(0, 1))
             {
                 // randomly use multiplication factor
                 factor = rand(2, 3);
+            }
+            else if (has_div && (1 < difficulty) && (0 === x % 2) && rand(0, 1))
+            {
+                // randomly use division factor
+                divider = 2;
             }
             if (0 < factor)
             {
@@ -222,6 +208,24 @@ class SimpleCaptcha
                     formula.push.apply(formula, String(factor).split(''));
                 }
             }
+            else if (0 < divider)
+            {
+                result += Math.floor(x / divider);
+                if (0 > x)
+                {
+                    formula.push('-');
+                    formula.push.apply(formula, String(Math.abs(x)).split(''));
+                    formula.push('÷');
+                    formula.push.apply(formula, String(divider).split(''));
+                }
+                else
+                {
+                    if (0 < i) formula.push('+');
+                    formula.push.apply(formula, String(x).split(''));
+                    formula.push('÷');
+                    formula.push.apply(formula, String(divider).split(''));
+                }
+            }
             else
             {
                 result += x;
@@ -237,6 +241,7 @@ class SimpleCaptcha
                 }
             }
             factor = 0;
+            divider = 0;
         }
         return [formula, result];
     }
@@ -254,19 +259,19 @@ class SimpleCaptcha
             h = ch + 2 * y0,
             wh = w*h,
 
-            r0 = (background >> 16) & 0xff,
-            g0 = (background >> 8) & 0xff,
-            b0 = (background) & 0xff,
-            r = (color >> 16) & 0xff,
-            g = (color >> 8) & 0xff,
-            b = (color) & 0xff,
-            imgbmp = new Array(wh),
+            r0 = clamp((background >>> 16) & 0xff),
+            g0 = clamp((background >>> 8) & 0xff),
+            b0 = clamp(background & 0xff),
+            r = clamp((color >>> 16) & 0xff),
+            g = clamp((color >>> 8) & 0xff),
+            b = clamp(color & 0xff),
+            imgbmp = new Uint32Array(wh),
             charbmp, img, c, i, x, y, alpha,
             phase, amplitude
         ;
 
         // img bitmap
-        for (c=((r0 << 16) | (g0 << 8) | (b0)) & 0xffffff,i=0; i<wh; ++i)
+        for (c=((r0 << 16) | (g0 << 8) | (b0)) & 0xffffffff,i=0; i<wh; ++i)
             imgbmp[i] = c;
 
         // render chars
@@ -282,7 +287,7 @@ class SimpleCaptcha
                     if (0 < alpha)
                     {
                         alpha = alpha / 255.0;
-                        imgbmp[x0+x + w*(y0+y)] = ((parseInt(r0*(1-alpha) + alpha*r) & 0xff) << 16) | (((parseInt(g0*(1-alpha) + alpha*g) & 0xff) << 8)) | ((parseInt(b0*(1-alpha) + alpha*b) & 0xff)) & 0xffffff;
+                        imgbmp[x0+x + w*(y0+y)] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff;
                     }
                 }
             }
@@ -302,9 +307,9 @@ class SimpleCaptcha
                 y0 = Math.max(0, Math.min(h-1, Math.round(y + amplitude * Math.sin(phase + 6.28 * 2 * x / w))));
                 c = imgbmp[x0 + w*y0];
                 i = 4*(x + w*y);
-                img[i] = (c >> 16) & 0xff;
-                img[i+1] = (c >> 8) & 0xff;
-                img[i+2] = (c) & 0xff;
+                img[i] = clamp((c >>> 16) & 0xff);
+                img[i+1] = clamp((c >>> 8) & 0xff);
+                img[i+2] = clamp(c & 0xff);
                 img[i+3] = 255;
             }
         }
@@ -2739,6 +2744,564 @@ class SimpleCaptcha
                         0,
                         0
                     ]
+                },
+                "÷": {
+                    "width": 11,
+                    "height": 8,
+                    "bitmap": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        0,
+                        0,
+                        182,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "=": {
+                    "width": 12,
+                    "height": 6,
+                    "bitmap": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "?": {
+                    "width": 12,
+                    "height": 15,
+                    "bitmap": [
+                        0,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        182,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        255,
+                        0,
+                        0,
+                        0,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        182,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        48,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
                 }
             }
         };
@@ -2746,45 +3309,153 @@ class SimpleCaptcha
 }
 
 // PNG utilities
-var APNG_DISPOSE_OP_NONE = 0,
-    APNG_DISPOSE_OP_BACKGROUND = 1,
-    APNG_DISPOSE_OP_PREVIOUS = 2,
-    APNG_BLEND_OP_SOURCE = 0,
-    APNG_BLEND_OP_OVER = 1;
+var PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
 
-var constants = {
+    TYPE_IHDR = 0x49484452,
+    TYPE_gAMA = 0x67414d41,
+    TYPE_tRNS = 0x74524e53,
+    TYPE_PLTE = 0x504c5445,
+    TYPE_IDAT = 0x49444154,
+    TYPE_IEND = 0x49454e44,
 
-  PNG_SIGNATURE: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+    // color-type bits
+    COLORTYPE_GRAYSCALE = 0,
+    COLORTYPE_PALETTE = 1,
+    COLORTYPE_COLOR = 2,
+    COLORTYPE_ALPHA = 4, // e.g. grayscale and alpha
 
-  TYPE_IHDR: 0x49484452,
-  TYPE_IEND: 0x49454e44,
-  TYPE_IDAT: 0x49444154,
-  TYPE_PLTE: 0x504c5445,
-  TYPE_tRNS: 0x74524e53,
-  TYPE_gAMA: 0x67414d41,
+    // color-type combinations
+    COLORTYPE_PALETTE_COLOR = 3,
+    COLORTYPE_COLOR_ALPHA = 6,
 
-  // color-type bits
-  COLORTYPE_GRAYSCALE: 0,
-  COLORTYPE_PALETTE: 1,
-  COLORTYPE_COLOR: 2,
-  COLORTYPE_ALPHA: 4, // e.g. grayscale and alpha
+    COLORTYPE_TO_BPP_MAP = {
+        0: 1,
+        2: 3,
+        3: 1,
+        4: 2,
+        6: 4
+    },
 
-  // color-type combinations
-  COLORTYPE_PALETTE_COLOR: 3,
-  COLORTYPE_COLOR_ALPHA: 6,
+    GAMMA_DIVISION = 100000
+;
 
-  COLORTYPE_TO_BPP_MAP: {
-    0: 1,
-    2: 3,
-    3: 1,
-    4: 2,
-    6: 4
-  },
+function clamp(value)
+{
+    return Math.max(0, Math.min(255, Math.round(value)));
+}
+function paethPredictor(left, above, upLeft)
+{
+    var paeth = left + above - upLeft,
+        pLeft = Math.abs(paeth - left),
+        pAbove = Math.abs(paeth - above),
+        pUpLeft = Math.abs(paeth - upLeft)
+    ;
 
-  GAMMA_DIVISION: 100000
-};
+    if (pLeft <= pAbove && pLeft <= pUpLeft) return left;
+    if (pAbove <= pUpLeft) return above;
+    return upLeft;
+}
+function filterNone(pxData, pxPos, byteWidth, rawData, rawPos)
+{
+    pxData.copy(rawData, rawPos, pxPos, pxPos + byteWidth);
+}
+function filterSumNone(pxData, pxPos, byteWidth)
+{
+    var sum = 0, length = pxPos + byteWidth;
+    for (var i = pxPos; i < length; i++)
+    {
+        sum += Math.abs(pxData[i]);
+    }
+    return sum;
+}
+function filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp)
+{
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        var val = pxData[pxPos + x] - left;
+        rawData[rawPos + x] = val;
+    }
+}
+function filterSumSub(pxData, pxPos, byteWidth, bpp)
+{
+    var sum = 0;
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        var val = pxData[pxPos + x] - left;
+        sum += Math.abs(val);
+    }
+    return sum;
+}
+function filterUp(pxData, pxPos, byteWidth, rawData, rawPos)
+{
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        var val = pxData[pxPos + x] - up;
+        rawData[rawPos + x] = val;
+    }
+}
+function filterSumUp(pxData, pxPos, byteWidth)
+{
+    var sum = 0, length = pxPos + byteWidth;
+    for (var x = pxPos; x < length; x++)
+    {
+        var up = pxPos > 0 ? pxData[x - byteWidth] : 0;
+        var val = pxData[x] - up;
+        sum += Math.abs(val);
+    }
+    return sum;
+}
+function filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp)
+{
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        var val = pxData[pxPos + x] - ((left + up) >> 1);
+        rawData[rawPos + x] = val;
+    }
+}
+function filterSumAvg(pxData, pxPos, byteWidth, bpp)
+{
+    var sum = 0;
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        var val = pxData[pxPos + x] - ((left + up) >> 1);
+        sum += Math.abs(val);
+    }
+    return sum;
+}
+function filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp)
+{
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        var upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
+        var val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        rawData[rawPos + x] = val;
+    }
+}
+function filterSumPaeth(pxData, pxPos, byteWidth, bpp)
+{
+    var sum = 0;
+    for (var x = 0; x < byteWidth; x++)
+    {
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
+        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
+        var upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
+        var val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        sum += Math.abs(val);
+    }
+    return sum;
+}
 
-async function zlib_deflate(data, compressionLevel, chunkSize)
+async function deflate(data, compressionLevel, chunkSize)
 {
     var opts = {
         chunkSize: null == chunkSize ? 16*1024 : chunkSize,
@@ -2796,400 +3467,289 @@ async function zlib_deflate(data, compressionLevel, chunkSize)
         });
     }));
 }
-
 var crcTable = null;
-function computeCRCTable()
+function getCRCTable()
 {
     if (null == crcTable)
     {
         crcTable = new Int32Array(256);
-        for (var i = 0; i < 256; ++i)
+        var i, j, currentCrc;
+        for (i=0; i<256; ++i)
         {
-            var currentCrc = i;
-            for (var j = 0; j < 8; ++j)
+            currentCrc = i;
+            for (j=0; j<8; ++j)
             {
-                if (currentCrc & 1)
-                {
-                    currentCrc = 0xedb88320 ^ (currentCrc >>> 1);
-                }
-                else
-                {
-                    currentCrc = currentCrc >>> 1;
-                }
+                currentCrc = currentCrc & 1 ? (0xedb88320 ^ (currentCrc >>> 1)) : (currentCrc >>> 1);
             }
             crcTable[i] = currentCrc;
         }
     }
     return crcTable;
 }
-function CrcStream()
+function crc32(buffer)
 {
-  this._crc = -1;
-}
-CrcStream.prototype.write = function(data) {
-    var crcTable = computeCRCTable();
-    for (var i = 0, l = data.length; i < l; ++i)
+    var crcTable = getCRCTable(), crc = -1, i, l;
+    for (i=0,l=buffer.length; i<l; ++i)
     {
-        this._crc = crcTable[(this._crc ^ data[i]) & 0xff] ^ (this._crc >>> 8);
+        crc = crcTable[(crc ^ buffer[i]) & 0xff] ^ (crc >>> 8);
     }
-    return true;
-};
-CrcStream.prototype.crc32 = function() {
-  return this._crc ^ -1;
-};
-CrcStream.crc32 = function(buf) {
-    var crcTable = computeCRCTable();
-    var crc = -1;
-    for (var i = 0, l = buf.length; i < l; ++i)
-    {
-        crc = crcTable[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
-    }
-    return crc ^ -1;
-};
-
-function bitPacker(data, width, height, options)
+    return crc ^ (-1);
+}
+function I1(value, buffer = null, pos = 0)
 {
-  var outHasAlpha = options.colorType === constants.COLORTYPE_COLOR_ALPHA;
-  if (options.inputHasAlpha && outHasAlpha) {
-    return data;
-  }
-  if (!options.inputHasAlpha && !outHasAlpha) {
-    return data;
-  }
+    if (null == buffer) buffer = Buffer.alloc(1);
+    if (null == pos) pos = 0;
+    buffer[pos] = value;
+    return buffer;
+}
+function I4(value, buffer = null, pos = 0)
+{
+    if (null == buffer) buffer = Buffer.alloc(4);
+    if (null == pos) pos = 0;
+    buffer.writeUInt32BE(value, pos);
+    return buffer;
+}
+function i4(value, buffer = null, pos = 0)
+{
+    if (null == buffer) buffer = Buffer.alloc(4);
+    if (null == pos) pos = 0;
+    buffer.writeInt32BE(value, pos);
+    return buffer;
+}
 
-  var outBpp = outHasAlpha ? 4 : 3;
-  var outData = Buffer.alloc(width * height * outBpp);
-  var inBpp = options.inputHasAlpha ? 4 : 3;
-  var inIndex = 0;
-  var outIndex = 0;
+class PNGPacker
+{
+    _options = null;
 
-  var bgColor = options.bgColor || {};
-  if (bgColor.red === undefined) {
-    bgColor.red = 255;
-  }
-  if (bgColor.green === undefined) {
-    bgColor.green = 255;
-  }
-  if (bgColor.blue === undefined) {
-    bgColor.blue = 255;
-  }
+    constructor(options) {
+        options = options || {};
 
-  for (var y = 0; y < height; y++) {
-    for (var x = 0; x < width; x++) {
-      var red = data[inIndex];
-      var green = data[inIndex + 1];
-      var blue = data[inIndex + 2];
+        options.deflateChunkSize = Math.max(1024, parseInt(options.deflateChunkSize || 32 * 1024));
+        options.deflateLevel = Math.min(9, Math.max(0, parseInt(options.deflateLevel != null ? options.deflateLevel : 9)));
+        options.deflateStrategy = Math.min(3, Math.max(0, parseInt(options.deflateStrategy != null ? options.deflateStrategy : 3)));
+        options.inputHasAlpha = !!(options.inputHasAlpha != null ? options.inputHasAlpha : true);
+        options.bitDepth = 8//options.bitDepth || 8;
+        options.colorType = Math.min(6, Math.max(0, parseInt(('number' === typeof options.colorType) ? options.colorType : COLORTYPE_COLOR_ALPHA)));
 
-      var alpha;
-      if (options.inputHasAlpha) {
-        alpha = data[inIndex + 3];
-        if (!outHasAlpha) {
-          alpha /= 255;
-          red = Math.min(Math.max(Math.round((1 - alpha) * bgColor.red + alpha * red), 0), 255);
-          green = Math.min(Math.max(Math.round((1 - alpha) * bgColor.green + alpha * green), 0), 255);
-          blue = Math.min(Math.max(Math.round((1 - alpha) * bgColor.blue + alpha * blue), 0), 255);
+        if (options.colorType !== COLORTYPE_COLOR && options.colorType !== COLORTYPE_COLOR_ALPHA)
+        {
+            throw new Error('option color type:' + options.colorType + ' is not supported at present');
         }
-      }
-      else {
-        alpha = 255;
-      }
-
-      outData[outIndex] = red;
-      outData[outIndex + 1] = green;
-      outData[outIndex + 2] = blue;
-      if (outHasAlpha) {
-        outData[outIndex + 3] = alpha;
-      }
-
-      inIndex += inBpp;
-      outIndex += outBpp;
+        /*if (options.bitDepth !== 8)
+        {
+            throw new Error('option bit depth:' + options.bitDepth + ' is not supported at present');
+        }*/
+        this._options = options;
     }
-  }
 
-  return outData;
-}
+    async toPNG(data, width, height) {
+        var png = [], filteredData, compressedData, deflateOpts;
 
-function paethPredictor(left, above, upLeft)
-{
+        // Signature
+        png.push(Buffer.from(PNG_SIGNATURE));
 
-  var paeth = left + above - upLeft;
-  var pLeft = Math.abs(paeth - left);
-  var pAbove = Math.abs(paeth - above);
-  var pUpLeft = Math.abs(paeth - upLeft);
+        // Header
+        png.push(this.packIHDR(width, height));
 
-  if (pLeft <= pAbove && pLeft <= pUpLeft) {
-    return left;
-  }
-  if (pAbove <= pUpLeft) {
-    return above;
-  }
-  return upLeft;
-}
+        // gAMA
+        if (this._options.gamma) png.push(this.packGAMA(this._options.gamma));
 
-function filterNone(pxData, pxPos, byteWidth, rawData, rawPos) {
-  pxData.copy(rawData, rawPos, pxPos, pxPos + byteWidth);
-}
+        // filter data
+        filteredData = this.filterData(Buffer.from(data), width, height);
 
-function filterSumNone(pxData, pxPos, byteWidth) {
+        // compress data
+        deflateOpts = this.getDeflateOptions();
+        compressedData = await deflate(filteredData, deflateOpts.level, deflateOpts.chuckSize);
+        filteredData = null;
 
-  var sum = 0;
-  var length = pxPos + byteWidth;
+        if (!compressedData || !compressedData.length)
+            throw new Error('bad png - invalid compressed data response');
 
-  for (var i = pxPos; i < length; i++) {
-    sum += Math.abs(pxData[i]);
-  }
-  return sum;
-}
+        // Data
+        png.push(this.packIDAT(Buffer.from(compressedData)));
+        compressedData = null;
 
-function filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
+        // End
+        png.push(this.packIEND());
 
-  for (var x = 0; x < byteWidth; x++) {
+        return Buffer.concat(png);
+    }
 
-    var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-    var val = pxData[pxPos + x] - left;
+    getDeflateOptions() {
+        return {
+            chunkSize: this._options.deflateChunkSize,
+            level: this._options.deflateLevel,
+            strategy: this._options.deflateStrategy
+        };
+    }
 
-    rawData[rawPos + x] = val;
-  }
-}
+    filterData(data, width, height) {
+        // convert to correct format for filtering (e.g. right bpp and bit depth)
+        // and filter pixel data
+        return this._filter(this._bitPack(data, width, height), width, height);
+    }
 
-function filterSumSub(pxData, pxPos, byteWidth, bpp) {
+    packIHDR(width, height) {
+        var buffer = Buffer.alloc(13);
+        I4(width, buffer, 0);
+        I4(height, buffer, 4);
+        I1(this._options.bitDepth, buffer, 8);  // bit depth
+        I1(this._options.colorType, buffer, 9); // colorType
+        I1(0, buffer, 10); // compression
+        I1(0, buffer, 11); // filter
+        I1(0, buffer, 12); // interlace
+        return this._packChunk(TYPE_IHDR, buffer);
+    }
 
-  var sum = 0;
-  for (var x = 0; x < byteWidth; x++) {
+    packGAMA(gamma) {
+        return this._packChunk(TYPE_gAMA, I4(Math.floor(parseFloat(gamma) * GAMMA_DIVISION)));
+    }
 
-    var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-    var val = pxData[pxPos + x] - left;
+    packIDAT(data) {
+        return this._packChunk(TYPE_IDAT, data);
+    }
 
-    sum += Math.abs(val);
-  }
+    packIEND() {
+        return this._packChunk(TYPE_IEND, null);
+    }
 
-  return sum;
-}
-
-function filterUp(pxData, pxPos, byteWidth, rawData, rawPos) {
-
-  for (var x = 0; x < byteWidth; x++) {
-
-    var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-    var val = pxData[pxPos + x] - up;
-
-    rawData[rawPos + x] = val;
-  }
-}
-
-function filterSumUp(pxData, pxPos, byteWidth) {
-
-  var sum = 0;
-  var length = pxPos + byteWidth;
-  for (var x = pxPos; x < length; x++) {
-
-    var up = pxPos > 0 ? pxData[x - byteWidth] : 0;
-    var val = pxData[x] - up;
-
-    sum += Math.abs(val);
-  }
-
-  return sum;
-}
-
-function filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
-
-  for (var x = 0; x < byteWidth; x++) {
-
-    var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-    var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-    var val = pxData[pxPos + x] - ((left + up) >> 1);
-
-    rawData[rawPos + x] = val;
-  }
-}
-
-function filterSumAvg(pxData, pxPos, byteWidth, bpp) {
-
-  var sum = 0;
-  for (var x = 0; x < byteWidth; x++) {
-
-    var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-    var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-    var val = pxData[pxPos + x] - ((left + up) >> 1);
-
-    sum += Math.abs(val);
-  }
-
-  return sum;
-}
-
-function filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp) {
-
-  for (var x = 0; x < byteWidth; x++) {
-
-    var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-    var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-    var upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
-    var val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
-
-    rawData[rawPos + x] = val;
-  }
-}
-
-function filterSumPaeth(pxData, pxPos, byteWidth, bpp) {
-  var sum = 0;
-  for (var x = 0; x < byteWidth; x++) {
-
-    var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-    var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-    var upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
-    var val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
-
-    sum += Math.abs(val);
-  }
-
-  return sum;
-}
-
-var filters = {
-  0: filterNone,
-  1: filterSub,
-  2: filterUp,
-  3: filterAvg,
-  4: filterPaeth
-};
-
-var filterSums = {
-  0: filterSumNone,
-  1: filterSumSub,
-  2: filterSumUp,
-  3: filterSumAvg,
-  4: filterSumPaeth
-};
-
-function filter(pxData, width, height, options, bpp)
-{
-  var filterTypes;
-  if (!('filterType' in options) || options.filterType === -1) {
-    filterTypes = [0, 1, 2, 3, 4];
-  }
-  else if (typeof options.filterType === 'number') {
-    filterTypes = [options.filterType];
-  }
-  else {
-    throw new Error('unrecognised filter types');
-  }
-
-  var byteWidth = width * bpp;
-  var rawPos = 0;
-  var pxPos = 0;
-  var rawData = Buffer.alloc((byteWidth + 1) * height);
-  var sel = filterTypes[0];
-
-  for (var y = 0; y < height; y++) {
-
-    if (filterTypes.length > 1) {
-      // find best filter for this line (with lowest sum of values)
-      var min = Infinity;
-
-      for (var i = 0; i < filterTypes.length; i++) {
-        var sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
-        if (sum < min) {
-          sel = filterTypes[i];
-          min = sum;
+    _bitPack(data, width, height) {
+        var inputHasAlpha = this._options.inputHasAlpha,
+            outHasAlpha = this._options.colorType === COLORTYPE_COLOR_ALPHA;
+        if (inputHasAlpha && outHasAlpha)
+        {
+            return data;
         }
-      }
+        if (!inputHasAlpha && !outHasAlpha)
+        {
+            return data;
+        }
+
+        var outBpp = outHasAlpha ? 4 : 3,
+            outData = Buffer.alloc(width * height * outBpp),
+            inBpp = inputHasAlpha ? 4 : 3,
+            inIndex = 0,
+            outIndex = 0,
+            bgColor = this._options.bgColor || {},
+            x, y, red, green, blue, alpha,
+            bgRed, bgGreen, bgBlue
+        ;
+
+        bgRed = clamp(bgColor.red != null ? bgColor.red : 255);
+        bgGreen = clamp(bgColor.green != null ? bgColor.green : 255);
+        bgBlue = clamp(bgColor.blue != null ? bgColor.blue : 255);
+
+        for (y = 0; y < height; y++)
+        {
+            for (x = 0; x < width; x++)
+            {
+                red = data[inIndex];
+                green = data[inIndex + 1];
+                blue = data[inIndex + 2];
+
+                if (inputHasAlpha)
+                {
+                    alpha = data[inIndex + 3];
+                    if (!outHasAlpha)
+                    {
+                        alpha /= 255.0;
+                        red = (1 - alpha) * bgRed + alpha * red;
+                        green = (1 - alpha) * bgGreen + alpha * green;
+                        blue = (1 - alpha) * bgBlue + alpha * blue;
+                    }
+                }
+                else
+                {
+                    alpha = 255;
+                }
+
+                outData[outIndex] = clamp(red);
+                outData[outIndex + 1] = clamp(green);
+                outData[outIndex + 2] = clamp(blue);
+                if (outHasAlpha) outData[outIndex + 3] = clamp(alpha);
+
+                inIndex += inBpp;
+                outIndex += outBpp;
+            }
+        }
+        return outData;
     }
 
-    rawData[rawPos] = sel;
-    rawPos++;
-    filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
-    rawPos += byteWidth;
-    pxPos += byteWidth;
-  }
-  return rawData;
+    _filter(pxData, width, height) {
+        var filters = [
+            filterNone,
+            filterSub,
+            filterUp,
+            filterAvg,
+            filterPaeth
+        ];
+        var filterSums = [
+            filterSumNone,
+            filterSumSub,
+            filterSumUp,
+            filterSumAvg,
+            filterSumPaeth
+        ];
+        var filterTypes;
+
+        if ((null == this._options.filterType) || (-1 === this._options.filterType))
+        {
+            filterTypes = [0, 1, 2, 3, 4];
+        }
+        else if ('number' === typeof this._options.filterType)
+        {
+            filterTypes = [this._options.filterType];
+        }
+        else
+        {
+            throw new Error('unrecognised filter types');
+        }
+
+        var bpp = COLORTYPE_TO_BPP_MAP[this._options.colorType],
+            byteWidth = width * bpp,
+            rawPos = 0, pxPos = 0,
+            rawData = Buffer.alloc((byteWidth + 1) * height),
+            sel = filterTypes[0],
+            y, i, n = filterTypes.length, min, sum
+        ;
+
+        for (y = 0; y < height; y++)
+        {
+            if (n > 1)
+            {
+                // find best filter for this line (with lowest sum of values)
+                min = Infinity;
+                for (i=0; i<n; i++)
+                {
+                    sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp);
+                    if (sum < min)
+                    {
+                        sel = filterTypes[i];
+                        min = sum;
+                    }
+                }
+            }
+
+            rawData[rawPos] = sel;
+            rawPos++;
+            filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp);
+            rawPos += byteWidth;
+            pxPos += byteWidth;
+        }
+        return rawData;
+    }
+
+    _packChunk(type, data = null) {
+        var length = data ? data.length : 0,
+            buffer = Buffer.alloc(length + 12)
+        ;
+        I4(length, buffer, 0);
+        I4(type, buffer, 4);
+        if (data) data.copy(buffer, 8);
+        i4(crc32(buffer.slice(4, buffer.length - 4)), buffer, buffer.length - 4);
+        return buffer;
+    }
 }
-
-var Packer = function(options) {
-  this._options = options;
-
-  options.deflateChunkSize = options.deflateChunkSize || 32 * 1024;
-  options.deflateLevel = options.deflateLevel != null ? options.deflateLevel : 9;
-  options.deflateStrategy = options.deflateStrategy != null ? options.deflateStrategy : 3;
-  options.inputHasAlpha = options.inputHasAlpha != null ? options.inputHasAlpha : true;
-  //options.deflateFactory = options.deflateFactory || FILTER.Util.ZLib.createDeflate;
-  options.bitDepth = options.bitDepth || 8;
-  options.colorType = (typeof options.colorType === 'number') ? options.colorType : constants.COLORTYPE_COLOR_ALPHA;
-
-  if (options.colorType !== constants.COLORTYPE_COLOR && options.colorType !== constants.COLORTYPE_COLOR_ALPHA) {
-    throw new Error('option color type:' + options.colorType + ' is not supported at present');
-  }
-  if (options.bitDepth !== 8) {
-    throw new Error('option bit depth:' + options.bitDepth + ' is not supported at present');
-  }
-};
-
-Packer.prototype.getDeflateOptions = function() {
-  return {
-    chunkSize: this._options.deflateChunkSize,
-    level: this._options.deflateLevel,
-    strategy: this._options.deflateStrategy
-  };
-};
-
-Packer.prototype.createDeflate = function() {
-  return this._options.deflateFactory(this.getDeflateOptions());
-};
-
-Packer.prototype.filterData = function(data, width, height) {
-  // convert to correct format for filtering (e.g. right bpp and bit depth)
-  var packedData = bitPacker(data, width, height, this._options);
-
-  // filter pixel data
-  var bpp = constants.COLORTYPE_TO_BPP_MAP[this._options.colorType];
-  var filteredData = filter(packedData, width, height, this._options, bpp);
-  return filteredData;
-};
-
-Packer.prototype._packChunk = function(type, data) {
-
-  var len = (data ? data.length : 0);
-  var buf = Buffer.alloc(len + 12);
-
-  buf.writeUInt32BE(len, 0);
-  buf.writeUInt32BE(type, 4);
-
-  if (data) {
-    data.copy(buf, 8);
-  }
-
-  buf.writeInt32BE(CrcStream.crc32(buf.slice(4, buf.length - 4)), buf.length - 4);
-  return buf;
-};
-
-Packer.prototype.packGAMA = function(gamma) {
-  var buf = Buffer.alloc(4);
-  buf.writeUInt32BE(Math.floor(gamma * constants.GAMMA_DIVISION), 0);
-  return this._packChunk(constants.TYPE_gAMA, buf);
-};
-
-Packer.prototype.packIHDR = function(width, height) {
-
-  var buf = Buffer.alloc(13);
-  buf.writeUInt32BE(width, 0);
-  buf.writeUInt32BE(height, 4);
-  buf[8] = this._options.bitDepth;  // Bit depth
-  buf[9] = this._options.colorType; // colorType
-  buf[10] = 0; // compression
-  buf[11] = 0; // filter
-  buf[12] = 0; // interlace
-
-  return this._packChunk(constants.TYPE_IHDR, buf);
-};
-
-Packer.prototype.packIDAT = function(data) {
-  return this._packChunk(constants.TYPE_IDAT, data);
-};
-
-Packer.prototype.packIEND = function() {
-  return this._packChunk(constants.TYPE_IEND, null);
-};
 
 // export it
 return SimpleCaptcha;

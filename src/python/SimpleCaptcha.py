@@ -18,7 +18,7 @@ def createHash(key, data):
     return str(hmac.new(bytes(str(key), 'utf-8'), msg=bytes(str(data), 'utf-8'), digestmod=hashlib.sha256).hexdigest())
 
 def imagepng(img, width, height, metaData=dict()):
-    return 'data:image/png;base64,' + base64.b64encode(Packer(metaData).toPNG(img, width, height)).decode("ascii")
+    return 'data:image/png;base64,' + base64.b64encode(PNGPacker(metaData).toPNG(img, width, height)).decode("ascii")
 
 
 class SimpleCaptcha:
@@ -32,7 +32,7 @@ class SimpleCaptcha:
         self.captcha = None
         self.hmac = None
         self.opts = {}
-        self.option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('difficulty', 1).option('num_terms', 2).option('min_term', 1).option('max_term', 20).option('color', 0x121212).option('background', 0xffffff)
+        self.option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('difficulty', 1).option('num_terms', 2).option('min_term', 1).option('max_term', 20).option('has_multiplication', True).option('has_division', True).option('color', 0x121212).option('background', 0xffffff)
 
     def option(self, *args):
         nargs = len(args)
@@ -68,11 +68,13 @@ class SimpleCaptcha:
         num_terms = max(2, int(self.option('num_terms')))
         min_term = max(0, int(self.option('min_term')))
         max_term = max(0, int(self.option('max_term')))
+        has_mult = bool(self.option('has_multiplication'))
+        has_div = bool(self.option('has_division'))
         color = int(self.option('color'))
         background = int(self.option('background'))
 
         # generate mathematical formula
-        formula, result = self.formula(num_terms, min_term, max_term, difficulty)
+        formula, result = self.formula(num_terms, min_term, max_term, has_mult, has_div, difficulty)
 
         # compute hmac of result
         self.hmac = createHash(str(self.option('secret_key')), str(self.option('secret_salt') if self.option('secret_salt') else '') + str(result))
@@ -85,20 +87,24 @@ class SimpleCaptcha:
 
         return self
 
-    def formula(self, terms, min, max, difficulty):
+    def formula(self, terms, min, max, has_mult, has_div, difficulty):
         # generate mathematical formula
         formula = []
         result = 0
         factor = 0
+        divider = 0
         for i in range(terms):
             x = rand(min, max)
 
             if (result > x) and rand(0, 1):
                 # randomly use plus or minus operator
                 x = -x
-            elif (1 < difficulty) and (x <= 5) and rand(0, 1):
+            elif has_mult and (1 < difficulty) and (x <= 10) and rand(0, 1):
                 # randomly use multiplication factor
                 factor = rand(2, 3)
+            elif has_div and (1 < difficulty) and (0 == x % 2) and rand(0, 1):
+                # randomly use division factor
+                divider = 2
 
             if 0 < factor:
                 result += x * factor
@@ -113,6 +119,19 @@ class SimpleCaptcha:
                     formula.append('×')
                     formula.extend(split(factor))
 
+            elif 0 < divider:
+                result += floor(x / divider)
+                if 0 > x:
+                    formula.append('-')
+                    formula.extend(split(abs(x)))
+                    formula.append('÷')
+                    formula.extend(split(divider))
+                else:
+                    if 0 < i: formula.append('+')
+                    formula.extend(split(x))
+                    formula.append('÷')
+                    formula.extend(split(divider))
+
             else:
                 result += x
                 if 0 > x:
@@ -123,6 +142,7 @@ class SimpleCaptcha:
                     formula.extend(split(x))
 
             factor = 0
+            divider = 0
 
         return (formula, result)
 
@@ -139,15 +159,15 @@ class SimpleCaptcha:
         h = ch + 2 * y0
         wh = w*h
 
-        r0 = (background >> 16) & 0xff
-        g0 = (background >> 8) & 0xff
-        b0 = (background) & 0xff
-        r = (color >> 16) & 0xff
-        g = (color >> 8) & 0xff
-        b = (color) & 0xff
+        r0 = clamp((background >> 16) & 0xff)
+        g0 = clamp((background >> 8) & 0xff)
+        b0 = clamp(background & 0xff)
+        r = clamp((color >> 16) & 0xff)
+        g = clamp((color >> 8) & 0xff)
+        b = clamp(color & 0xff)
 
         # img bitmap
-        imgbmp = [((r0 << 16) | (g0 << 8) | (b0)) & 0xffffff] * wh
+        imgbmp = [((r0 << 16) | (g0 << 8) | (b0)) & 0xffffffff] * wh
 
         # render chars
         for c in chars:
@@ -157,7 +177,7 @@ class SimpleCaptcha:
                     alpha = charbmp[x + cw*y]
                     if 0 < alpha:
                         alpha = float(alpha) / 255.0
-                        imgbmp[x0+x + w*(y0+y)] = ((int(r0*(1-alpha) + alpha*r) & 0xff) << 16) | (((int(g0*(1-alpha) + alpha*g) & 0xff) << 8)) | ((int(b0*(1-alpha) + alpha*b) & 0xff)) & 0xffffff
+                        imgbmp[x0+x + w*(y0+y)] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff
 
             x0 += cw + space
 
@@ -165,16 +185,16 @@ class SimpleCaptcha:
         img = [0] * (4*wh)
         phase = float(rand(0, 2)) * 3.14 / 2.0;
         amplitude = 5.0 if 3 == difficulty else (3.0 if 2 == difficulty else 1.5)
-        for y in range(y):
+        for y in range(h):
             y0 = y
             for x in range(w):
                 x0 = x
                 y0 = max(0, min(h-1, round(y + amplitude * math.sin(phase + 6.28 * 2.0 * x / w))))
                 c = imgbmp[x0 + w*y0]
                 i = 4*(x + w*y)
-                img[i] = (c >> 16) & 0xff
-                img[i+1] = (c >> 8) & 0xff
-                img[i+2] = (c) & 0xff
+                img[i] = clamp((c >> 16) & 0xff)
+                img[i+1] = clamp((c >> 8) & 0xff)
+                img[i+2] = clamp(c & 0xff)
                 img[i+3] = 255
 
         # free memory
@@ -2606,6 +2626,564 @@ class SimpleCaptcha:
                         0,
                         0
                     ]
+                },
+                "÷": {
+                    "width": 11,
+                    "height": 8,
+                    "bitmap": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        0,
+                        0,
+                        182,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "=": {
+                    "width": 12,
+                    "height": 6,
+                    "bitmap": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        139,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
+                },
+                "?": {
+                    "width": 12,
+                    "height": 15,
+                    "bitmap": [
+                        0,
+                        0,
+                        0,
+                        222,
+                        255,
+                        255,
+                        255,
+                        255,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        182,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        255,
+                        0,
+                        0,
+                        0,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        48,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        182,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        182,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        48,
+                        255,
+                        222,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        139,
+                        255,
+                        94,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0
+                    ]
                 }
             }
         }
@@ -2636,53 +3214,7 @@ COLORTYPE_TO_BPP_MAP = {
 GAMMA_DIVISION = 100000
 
 def clamp(value):
-    return min(255, max(0, int(value)))
-
-def bitPacker(data, width, height, options=dict()):
-    global COLORTYPE_COLOR_ALPHA
-
-    outHasAlpha = ('colorType' in options) and options['colorType'] == COLORTYPE_COLOR_ALPHA
-    inputHasAlpha = ('inputHasAlpha' in options) and bool(options['inputHasAlpha'])
-
-    if inputHasAlpha and outHasAlpha: return data
-    if (not inputHasAlpha) and (not outHasAlpha): return data
-
-    outBpp = 4 if outHasAlpha else 3
-    outData = [0] * (width * height * outBpp)
-    inBpp = 4 if inputHasAlpha else 3
-    inIndex = 0
-    outIndex = 0
-
-    bgColor = options['bgColor'] if 'bgColor' in options else {}
-    if not 'red' in bgColor: bgColor['red'] = 255
-    if not 'green' in bgColor: bgColor['green'] = 255
-    if not 'blue' in bgColor: bgColor['blue'] = 255
-
-    for y in range(height):
-        for x in range(width):
-            red = data[inIndex]
-            green = data[inIndex + 1]
-            blue = data[inIndex + 2]
-
-            if inputHasAlpha:
-                alpha = data[inIndex + 3]
-                if not outHasAlpha:
-                    alpha = float(alpha) / 255.0
-                    red = round((1 - alpha) * bgColor['red'] + alpha * red)
-                    green = round((1 - alpha) * bgColor['green'] + alpha * green)
-                    blue = round((1 - alpha) * bgColor['blue'] + alpha * blue)
-            else:
-                alpha = 255
-
-            outData[outIndex] = clamp(red)
-            outData[outIndex + 1] = clamp(green)
-            outData[outIndex + 2] = clamp(blue)
-            if outHasAlpha: outData[outIndex + 3] = clamp(alpha)
-
-            inIndex += inBpp
-            outIndex += outBpp
-
-    return outData
+    return max(0, min(255, round(value)))
 
 def paethPredictor(left, above, upLeft):
     paeth = left + above - upLeft
@@ -2695,7 +3227,7 @@ def paethPredictor(left, above, upLeft):
     return upLeft
 
 def filterNone(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
-    pxData[pxPos:pxPos + byteWidth] = rawData[rawPos:rawPos + byteWidth]
+    rawData[rawPos:rawPos+byteWidth] = pxData[pxPos:pxPos+byteWidth]
 
 def filterSumNone(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -2707,7 +3239,7 @@ def filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
     for x in range(byteWidth):
         left = pxData[pxPos + x - bpp] if x >= bpp else 0
         val = pxData[pxPos + x] - left
-        rawData[rawPos + x] = clamp(val)
+        rawData[rawPos + x] = val
 
 def filterSumSub(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -2721,7 +3253,7 @@ def filterUp(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
     for x in range(byteWidth):
         up = pxData[pxPos + x - byteWidth] if pxPos > 0 else 0
         val = pxData[pxPos + x] - up
-        rawData[rawPos + x] = clamp(val)
+        rawData[rawPos + x] = val
 
 def filterSumUp(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -2736,7 +3268,7 @@ def filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
         left = pxData[pxPos + x - bpp] if x >= bpp else 0
         up = pxData[pxPos + x - byteWidth] if pxPos > 0 else 0
         val = pxData[pxPos + x] - ((left + up) >> 1)
-        rawData[rawPos + x] = clamp(val)
+        rawData[rawPos + x] = val
 
 def filterSumAvg(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -2753,7 +3285,7 @@ def filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
         up = pxData[pxPos + x - byteWidth] if pxPos > 0 else 0
         upleft = pxData[pxPos + x - (byteWidth + bpp)] if pxPos > 0 and x >= bpp else 0
         val = pxData[pxPos + x] - paethPredictor(left, up, upleft)
-        rawData[rawPos + x] = clamp(val)
+        rawData[rawPos + x] = val
 
 def filterSumPaeth(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -2766,75 +3298,36 @@ def filterSumPaeth(pxData, pxPos, byteWidth, bpp):
     return sum
 
 
-def filter(pxData, width, height, options, bpp):
-    filters = {
-      '0': filterNone,
-      '1': filterSub,
-      '2': filterUp,
-      '3': filterAvg,
-      '4': filterPaeth
-    }
-
-    filterSums = {
-      '0': filterSumNone,
-      '1': filterSumSub,
-      '2': filterSumUp,
-      '3': filterSumAvg,
-      '4': filterSumPaeth
-    }
-
-    if (not 'filterType' in options) or (options['filterType'] == -1):
-        filterTypes = [0, 1, 2, 3, 4]
-    elif int(options['filterType']) == options['filterType']:
-        filterTypes = [options['filterType']]
-    else:
-        raise Exception('unrecognised filter types')
-
-    byteWidth = width * bpp
-    rawPos = 0
-    pxPos = 0
-    rawData = [0] * ((byteWidth + 1) * height)
-    sel = filterTypes[0]
-
-    for y in range(height):
-        if len(filterTypes) > 1:
-            # find best filter for this line (with lowest sum of values)
-            min = math.inf
-            for i in range(len(filterTypes)):
-                sum = filterSums[str(filterTypes[i])](pxData, pxPos, byteWidth, bpp)
-                if sum < min:
-                    sel = filterTypes[i]
-                    min = sum
-
-        rawData[rawPos] = sel
-        rawPos += 1
-        filters[str(sel)](pxData, pxPos, byteWidth, rawData, rawPos, bpp)
-        rawPos += byteWidth
-        pxPos += byteWidth
-    return rawData
-
-
 def deflate(data, compressionLevel=-1, chunkSize=None):
-    chunkSize = 16*1024 if chunkSize is None else chunkSize
+    #chunkSize = 16*1024 if chunkSize is None else chunkSize
     compressor = zlib.compressobj(level=compressionLevel)
     zdata = compressor.compress(data)
     zdata += compressor.flush()
     return zdata
 
+#def tounsigned(value):
+#    b = struct.unpack('!B', struct.pack('!b', value))
+#    return b[0]
+#
+#def tosigned32(value):
+#    i = struct.unpack('!i', struct.pack('!I', value))
+#    return i[0]
+
 def crc32(data):
+    #return tosigned32(zlib.crc32(data))
     return zlib.crc32(data)
 
 def I1(value):
-    return struct.pack("!B", int(value) & (0xff))
+    return struct.pack('!B', value)
 
 def I4(value):
-    return struct.pack("!I", int(value) & (0xffffffff))
+    return struct.pack('!I', value)
 
-class Packer:
+def i4(value):
+    return struct.pack('!i', value)
+
+class PNGPacker:
     def __init__(self, options=dict()):
-        global COLORTYPE_COLOR_ALPHA
-        global COLORTYPE_COLOR
-
         options['deflateChunkSize'] = max(1024, int(options['deflateChunkSize'] if ('deflateChunkSize' in options) else 32 * 1024))
         options['deflateLevel'] = min(9, max(0, int(options['deflateLevel'] if ('deflateLevel' in options) else 9)))
         options['deflateStrategy'] = min(3, max(0, int(options['deflateStrategy'] if ('deflateStrategy' in options) else 3)))
@@ -2850,24 +3343,27 @@ class Packer:
         self._options = options
 
     def toPNG(self, data, width, height):
-        global PNG_SIGNATURE
-
         # Signature
         png = PNG_SIGNATURE
 
         # Header
         png += self.packIHDR(width, height)
 
+        # gAMA
         if 'gamma' in self._options:
             png += self.packGAMA(self._options['gamma']);
 
+        # filter data
         filteredData = self.filterData(data, width, height)
 
-        # compress it
+        # compress data
         deflateOpts = self.getDeflateOptions()
         compressedData = deflate(bytes(filteredData), deflateOpts['level'], deflateOpts['chunkSize'])
+        filteredData = None
 
+        # Data
         png += self.packIDAT(compressedData)
+        compressedData = None
 
         # End
         png += self.packIEND()
@@ -2882,22 +3378,9 @@ class Packer:
         }
 
     def filterData(self, data, width, height):
-        global COLORTYPE_TO_BPP_MAP
         # convert to correct format for filtering (e.g. right bpp and bit depth)
-        packedData = bitPacker(data, width, height, self._options)
-        # filter pixel data
-        bpp = COLORTYPE_TO_BPP_MAP[str(self._options['colorType'])]
-        filteredData = filter(packedData, width, height, self._options, bpp)
-        return filteredData
-
-    def _packChunk(self, type, data = None):
-        block = str(type).encode('ascii')
-        length = 0;
-        if data is not None:
-            if isinstance(data, list): data = bytes(data)
-            length = len(data)
-            block += data
-        return I4(length) + block + I4(crc32(block))
+        # and filter pixel data
+        return self._filter(self._bitPack(data, width, height), width, height)
 
     def packIHDR(self, width, height):
         IHDR = I4(width) + I4(height)
@@ -2909,7 +3392,6 @@ class Packer:
         return self._packChunk('IHDR', IHDR)
 
     def packGAMA(self, gamma):
-        global GAMMA_DIVISION
         return self._packChunk('gAMA', I4(floor(float(gamma) * GAMMA_DIVISION)))
 
     def packIDAT(self, data):
@@ -2917,6 +3399,110 @@ class Packer:
 
     def packIEND(self):
         return self._packChunk('IEND', None)
+
+    def _bitPack(self, data, width, height):
+        outHasAlpha = ('colorType' in self._options) and self._options['colorType'] == COLORTYPE_COLOR_ALPHA
+        inputHasAlpha = ('inputHasAlpha' in self._options) and bool(self._options['inputHasAlpha'])
+
+        if inputHasAlpha and outHasAlpha: return data
+        if (not inputHasAlpha) and (not outHasAlpha): return data
+
+        outBpp = 4 if outHasAlpha else 3
+        outData = [0] * (width * height * outBpp)
+        inBpp = 4 if inputHasAlpha else 3
+        inIndex = 0
+        outIndex = 0
+
+        bgColor = self._options['bgColor'] if 'bgColor' in self._options else {}
+        bgRed = clamp(bgColor['red'] if 'red' in bgColor else 255)
+        bgGreen = clamp(bgColor['green'] if 'green' in bgColor else 255)
+        bgBlue = clamp(bgColor['blue'] if 'blue' in bgColor else 255)
+
+        for y in range(height):
+            for x in range(width):
+                red = data[inIndex]
+                green = data[inIndex + 1]
+                blue = data[inIndex + 2]
+
+                if inputHasAlpha:
+                    alpha = data[inIndex + 3]
+                    if not outHasAlpha:
+                        alpha = float(alpha) / 255.0
+                        red = (1 - alpha) * bgRed + alpha * red
+                        green = (1 - alpha) * bgGreen + alpha * green
+                        blue = (1 - alpha) * bgBlue + alpha * blue
+                else:
+                    alpha = 255
+
+                outData[outIndex] = clamp(red)
+                outData[outIndex + 1] = clamp(green)
+                outData[outIndex + 2] = clamp(blue)
+                if outHasAlpha: outData[outIndex + 3] = clamp(alpha)
+
+                inIndex += inBpp
+                outIndex += outBpp
+
+        return outData
+
+    def _filter(self, pxData, width, height):
+        filters = [
+          filterNone,
+          filterSub,
+          filterUp,
+          filterAvg,
+          filterPaeth
+        ]
+
+        filterSums = [
+          filterSumNone,
+          filterSumSub,
+          filterSumUp,
+          filterSumAvg,
+          filterSumPaeth
+        ]
+
+        filterTypes = [0] # problem with bytes conversion in filters output of signed ints
+
+        #if (not 'filterType' in self._options) or (self._options['filterType'] == -1):
+        #    filterTypes = [0, 1, 2, 3, 4]
+        #elif int(self._options['filterType']) == self._options['filterType']:
+        #    filterTypes = [self._options['filterType']]
+        #else:
+        #    raise Exception('unrecognised filter types')
+
+        bpp = COLORTYPE_TO_BPP_MAP[str(self._options['colorType'])]
+        byteWidth = width * bpp
+        rawPos = 0
+        pxPos = 0
+        rawData = [0] * ((byteWidth + 1) * height)
+        sel = filterTypes[0]
+        n = len(filterTypes)
+
+        for y in range(height):
+            if n > 1:
+                # find best filter for this line (with lowest sum of values)
+                min = math.inf
+                for i in range(n):
+                    sum = filterSums[filterTypes[i]](pxData, pxPos, byteWidth, bpp)
+                    if sum < min:
+                        sel = filterTypes[i]
+                        min = sum
+
+            rawData[rawPos] = sel
+            rawPos += 1
+            filters[sel](pxData, pxPos, byteWidth, rawData, rawPos, bpp)
+            rawPos += byteWidth
+            pxPos += byteWidth
+        return rawData
+
+    def _packChunk(self, type, data = None):
+        block = str(type).encode('ascii')
+        length = 0
+        if data is not None:
+            if isinstance(data, list): data = bytes(data)
+            length = len(data)
+            block += data
+        return I4(length) + block + I4(crc32(block))
 
 
 __all__ = ['SimpleCaptcha']
