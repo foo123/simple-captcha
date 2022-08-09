@@ -22,12 +22,20 @@ else if (!(name in root)) /* Browser/WebWorker/.. */
 var HAS = Object.prototype.hasOwnProperty,
     toString = Object.prototype.toString,
     isNode = ("undefined" !== typeof global) && ("[object global]" === toString.call(global)),
-    isBrowser = ("undefined" !== typeof window) && ("[object Window]" === toString.call(window))
+    isBrowser = ("undefined" !== typeof window) && ("[object Window]" === toString.call(window)),
+    padStart = String.prototype.padStart
+        ? function(s, n, p) {return s.padStart(n, p);}
+        : function(s, n, p) {return s.length < n ? (new Array(n-s.length+1)).join(p) + s : s;}
 ;
 
 function rand(m, M)
 {
     return Math.round(m + (M-m)*Math.random());
+}
+
+function hex(s)
+{
+    return String(s).split('').map(function(c) {return padStart(c.charCodeAt(0).toString(16), 8, '0');}).join('');
 }
 
 async function createHash(key, data)
@@ -38,20 +46,20 @@ async function createHash(key, data)
         try {
             hmac = require('crypto').createHmac('sha256', key).update(data).digest('hex');
         } catch (e) {
-            hmac = String(data);
+            hmac = hex(data);
         }
     }
     else if (isBrowser)
     {
         try {
-            hmac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', (new TextEncoder()).encode(data)))).map(function(b) {return b.toString(16).padStart(2, '0');}).join('');
+            hmac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', (new TextEncoder()).encode(data)))).map(function(b) {return padStart(b.toString(16), 2, '0');}).join('');
         } catch (e) {
-            hmac = String(data);
+            hmac = hex(data);
         }
     }
     else
     {
-        hmac = String(data);
+        hmac = hex(data);
     }
     return hmac;
 }
@@ -3366,8 +3374,8 @@ function filterNone(pxData, pxPos, byteWidth, rawData, rawPos)
 }
 function filterSumNone(pxData, pxPos, byteWidth)
 {
-    var sum = 0, length = pxPos + byteWidth;
-    for (var i = pxPos; i < length; i++)
+    var sum = 0, i, length = pxPos + byteWidth;
+    for (i = pxPos; i < length; i++)
     {
         sum += Math.abs(pxData[i]);
     }
@@ -3377,18 +3385,20 @@ function filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp)
 {
     for (var x = 0; x < byteWidth; x++)
     {
-        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        var val = pxData[pxPos + x] - left;
-        rawData[rawPos + x] = val;
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0,
+            val = pxData[pxPos + x] - left
+        ;
+        rawData[rawPos + x] = ubyte(val);
     }
 }
 function filterSumSub(pxData, pxPos, byteWidth, bpp)
 {
-    var sum = 0;
-    for (var x = 0; x < byteWidth; x++)
+    var sum = 0, x;
+    for (x = 0; x < byteWidth; x++)
     {
-        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        var val = pxData[pxPos + x] - left;
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0,
+            val = pxData[pxPos + x] - left
+        ;
         sum += Math.abs(val);
     }
     return sum;
@@ -3397,18 +3407,20 @@ function filterUp(pxData, pxPos, byteWidth, rawData, rawPos)
 {
     for (var x = 0; x < byteWidth; x++)
     {
-        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        var val = pxData[pxPos + x] - up;
-        rawData[rawPos + x] = val;
+        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0,
+            val = pxData[pxPos + x] - up
+        ;
+        rawData[rawPos + x] = ubyte(val);
     }
 }
 function filterSumUp(pxData, pxPos, byteWidth)
 {
-    var sum = 0, length = pxPos + byteWidth;
-    for (var x = pxPos; x < length; x++)
+    var sum = 0, x, length = pxPos + byteWidth;
+    for (x = pxPos; x < length; x++)
     {
-        var up = pxPos > 0 ? pxData[x - byteWidth] : 0;
-        var val = pxData[x] - up;
+        var up = pxPos > 0 ? pxData[x - byteWidth] : 0,
+            val = pxData[x] - up
+        ;
         sum += Math.abs(val);
     }
     return sum;
@@ -3417,20 +3429,22 @@ function filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp)
 {
     for (var x = 0; x < byteWidth; x++)
     {
-        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        var val = pxData[pxPos + x] - ((left + up) >> 1);
-        rawData[rawPos + x] = val;
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0,
+            up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0,
+            val = pxData[pxPos + x] - ((left + up) >> 1)
+        ;
+        rawData[rawPos + x] = ubyte(val);
     }
 }
 function filterSumAvg(pxData, pxPos, byteWidth, bpp)
 {
-    var sum = 0;
-    for (var x = 0; x < byteWidth; x++)
+    var sum = 0, x;
+    for (x = 0; x < byteWidth; x++)
     {
-        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        var val = pxData[pxPos + x] - ((left + up) >> 1);
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0,
+            up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0,
+            val = pxData[pxPos + x] - ((left + up) >> 1)
+        ;
         sum += Math.abs(val);
     }
     return sum;
@@ -3439,22 +3453,24 @@ function filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp)
 {
     for (var x = 0; x < byteWidth; x++)
     {
-        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        var upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
-        var val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
-        rawData[rawPos + x] = val;
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0,
+            up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0,
+            upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0,
+            val = pxData[pxPos + x] - paethPredictor(left, up, upleft)
+        ;
+        rawData[rawPos + x] = ubyte(val);
     }
 }
 function filterSumPaeth(pxData, pxPos, byteWidth, bpp)
 {
-    var sum = 0;
-    for (var x = 0; x < byteWidth; x++)
+    var sum = 0, x;
+    for (x = 0; x < byteWidth; x++)
     {
-        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0;
-        var up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0;
-        var upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0;
-        var val = pxData[pxPos + x] - paethPredictor(left, up, upleft);
+        var left = x >= bpp ? pxData[pxPos + x - bpp] : 0,
+            up = pxPos > 0 ? pxData[pxPos + x - byteWidth] : 0,
+            upleft = pxPos > 0 && x >= bpp ? pxData[pxPos + x - (byteWidth + bpp)] : 0,
+            val = pxData[pxPos + x] - paethPredictor(left, up, upleft)
+        ;
         sum += Math.abs(val);
     }
     return sum;
@@ -3500,18 +3516,22 @@ function crc32(buffer)
     }
     return crc ^ (-1);
 }
+function ubyte(value)
+{
+    return value & 0xff;
+}
 function I1(value, buffer = null, pos = 0)
 {
     if (null == buffer) buffer = Buffer.alloc(1);
     if (null == pos) pos = 0;
-    buffer[pos] = value;
+    buffer[pos] = value & 0xff;
     return buffer;
 }
 function I4(value, buffer = null, pos = 0)
 {
     if (null == buffer) buffer = Buffer.alloc(4);
     if (null == pos) pos = 0;
-    buffer.writeUInt32BE(value, pos);
+    buffer.writeUInt32BE(value & 0xffffffff, pos);
     return buffer;
 }
 function i4(value, buffer = null, pos = 0)
@@ -3695,7 +3715,7 @@ class PNGPacker
             filterSumAvg,
             filterSumPaeth
         ];
-        var filterTypes = [0]; // use default to match with python version
+        var filterTypes = [0]; // make it default
 
         /*if ((null == this._options.filterType) || (-1 === this._options.filterType))
         {

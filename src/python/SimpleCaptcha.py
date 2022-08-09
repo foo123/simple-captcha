@@ -3254,7 +3254,7 @@ def filterSub(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
     for x in range(byteWidth):
         left = pxData[pxPos + x - bpp] if x >= bpp else 0
         val = pxData[pxPos + x] - left
-        rawData[rawPos + x] = val
+        rawData[rawPos + x] = ubyte(val)
 
 def filterSumSub(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -3268,7 +3268,7 @@ def filterUp(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
     for x in range(byteWidth):
         up = pxData[pxPos + x - byteWidth] if pxPos > 0 else 0
         val = pxData[pxPos + x] - up
-        rawData[rawPos + x] = val
+        rawData[rawPos + x] = ubyte(val)
 
 def filterSumUp(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -3283,7 +3283,7 @@ def filterAvg(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
         left = pxData[pxPos + x - bpp] if x >= bpp else 0
         up = pxData[pxPos + x - byteWidth] if pxPos > 0 else 0
         val = pxData[pxPos + x] - ((left + up) >> 1)
-        rawData[rawPos + x] = val
+        rawData[rawPos + x] = ubyte(val)
 
 def filterSumAvg(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -3300,7 +3300,7 @@ def filterPaeth(pxData, pxPos, byteWidth, rawData, rawPos, bpp):
         up = pxData[pxPos + x - byteWidth] if pxPos > 0 else 0
         upleft = pxData[pxPos + x - (byteWidth + bpp)] if pxPos > 0 and x >= bpp else 0
         val = pxData[pxPos + x] - paethPredictor(left, up, upleft)
-        rawData[rawPos + x] = val
+        rawData[rawPos + x] = ubyte(val)
 
 def filterSumPaeth(pxData, pxPos, byteWidth, bpp):
     sum = 0
@@ -3320,23 +3320,17 @@ def deflate(data, compressionLevel=-1, chunkSize=None):
     zdata += compressor.flush()
     return zdata
 
-#def tounsigned(value):
-#    b = struct.unpack('!B', struct.pack('!b', value))
-#    return b[0]
-#
-#def tosigned32(value):
-#    i = struct.unpack('!i', struct.pack('!I', value))
-#    return i[0]
-
 def crc32(data):
-    #return tosigned32(zlib.crc32(data))
     return zlib.crc32(data)
 
+def ubyte(value):
+    return value & 0xff
+
 def I1(value):
-    return struct.pack('!B', value)
+    return struct.pack('!B', value & 0xff)
 
 def I4(value):
-    return struct.pack('!I', value)
+    return struct.pack('!I', value & 0xffffffff)
 
 def i4(value):
     return struct.pack('!i', value)
@@ -3476,7 +3470,7 @@ class PNGPacker:
           filterSumPaeth
         ]
 
-        filterTypes = [0] # problem with bytes conversion in filters output of signed ints
+        filterTypes = [0] # make it default
 
         #if (not 'filterType' in self._options) or (self._options['filterType'] == -1):
         #    filterTypes = [0, 1, 2, 3, 4]
