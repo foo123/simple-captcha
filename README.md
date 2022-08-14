@@ -34,6 +34,7 @@ $captcha = (new SimpleCaptcha())
     ->option('secret_key', 'SECRET_KEY')
     ->option('secret_salt', 'SECRET_SALT_')
     ->option('difficulty', 1) // 0 (easy) to 3 (difficult)
+    ->option('distortion', ['1'=>4.0]) // custom image distortion per difficulty
     ->option('num_terms', 2)
     ->option('max_num_terms', 4) // -1 means constant num_terms
     ->option('min_term', 1)

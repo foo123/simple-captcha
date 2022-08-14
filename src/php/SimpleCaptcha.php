@@ -26,6 +26,7 @@ class SimpleCaptcha
         $this->option('secret_key', 'SECRET_KEY');
         $this->option('secret_salt', 'SECRET_SALT_');
         $this->option('difficulty', 1); // 0 (very easy) to 3 (more difficult)
+        $this->option('distortion', array('1'=>1.5,'2'=>3.0,'3'=>5.0)); // distortions by difficulty
         $this->option('num_terms', 2); // default
         $this->option('max_num_terms', -1); // default, same as num_terms
         $this->option('min_term', 1); // default
@@ -81,6 +82,7 @@ class SimpleCaptcha
     private function generate()
     {
         $difficulty = min(3, max(0, (int)$this->option('difficulty')));
+        $distortion = $this->option('distortion');
         $num_terms = max(1, (int)$this->option('num_terms'));
         $max_num_terms = (int)$this->option('max_num_terms');
         $min_term = max(0, (int)$this->option('min_term'));
@@ -104,7 +106,7 @@ class SimpleCaptcha
         $this->hmac = hash_hmac($algo, (string)($this->option('secret_salt') ? $this->option('secret_salt') : '') . (string)$result, $this->option('secret_key'));
 
         // create image captcha with formula depending on difficulty
-        $captcha = $this->image($formula, $color, $background, $difficulty);
+        $captcha = $this->image($formula, $color, $background, $difficulty, $distortion);
 
         // output image
         ob_start(); imagepng($captcha);
@@ -202,7 +204,7 @@ class SimpleCaptcha
         return array($formula, $result);
     }
 
-    private function image($chars, $color, $background, $difficulty)
+    private function image($chars, $color, $background, $difficulty, $distortion)
     {
         $bitmaps = $this->chars();
 
@@ -249,7 +251,7 @@ class SimpleCaptcha
         {
             // create distorted GD image based on difficulty level
             $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
-            $amplitude = 3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5);
+            $amplitude = is_array($distortion) && isset($distortion[(string)$difficulty]) ? (float)$distortion[(string)$difficulty] : (3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5));
             for ($y=0; $y<$h; ++$y)
             {
                 $y0 = $y;

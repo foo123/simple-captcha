@@ -109,6 +109,7 @@ class SimpleCaptcha
         this.option('secret_key', 'SECRET_KEY');
         this.option('secret_salt', 'SECRET_SALT_');
         this.option('difficulty', 1); // 0 (very easy) to 3 (more difficult)
+        this.option('distortion', {'1':1.5,'2':3.0,'3':5.0}); // distortions by difficulty
         this.option('num_terms', 2); // default
         this.option('max_num_terms', -1); // default, same as num_terms
         this.option('min_term', 1); // default
@@ -157,6 +158,7 @@ class SimpleCaptcha
 
     async generate() {
         var difficulty = Math.min(3, Math.max(0, parseInt(this.option('difficulty')))),
+            distortion = this.option('distortion'),
             num_terms = Math.max(1, parseInt(this.option('num_terms'))),
             max_num_terms = parseInt(this.option('max_num_terms')),
             min_term = Math.max(0, parseInt(this.option('min_term'))),
@@ -181,7 +183,7 @@ class SimpleCaptcha
         this.hmac = await createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(result));
 
         // create image captcha with formula depending on difficulty
-        [captcha, width, height] = this.image(formula, color, background, difficulty);
+        [captcha, width, height] = this.image(formula, color, background, difficulty, distortion);
 
         // output image
         this.captcha = await imagepng(captcha, width, height);
@@ -271,7 +273,7 @@ class SimpleCaptcha
         return [formula, result];
     }
 
-    image(chars, color, background, difficulty) {
+    image(chars, color, background, difficulty, distortion) {
         var bitmaps = this.chars(),
 
             cw = bitmaps.width,
@@ -324,7 +326,7 @@ class SimpleCaptcha
         {
             // create distorted image data based on difficulty level
             phase = rand(0, 2) * 3.14 / 2.0;
-            amplitude = 3 == difficulty ? 5.0 : (2 == difficulty ? 3.0 : 1.5);
+            amplitude = ('object' === typeof distortion) && HAS.call(distortion, String(difficulty)) ? parseFloat(distortion[String(difficulty)]) : (3 == difficulty ? 5.0 : (2 == difficulty ? 3.0 : 1.5));
             for (y=0,yw=0; y<h; ++y,yw+=w)
             {
                 y0 = y;

@@ -35,6 +35,7 @@ class SimpleCaptcha:
         self.option('secret_key', 'SECRET_KEY')
         self.option('secret_salt', 'SECRET_SALT_')
         self.option('difficulty', 1) # 0 (very easy) to 3 (more difficult)
+        self.option('distortion', {'1':1.5,'2':3.0,'3':5.0}) # distortions by difficulty
         self.option('num_terms', 2) # default
         self.option('max_num_terms', -1) # default, same as num_terms
         self.option('min_term', 1) # default
@@ -75,7 +76,8 @@ class SimpleCaptcha:
         return hasha == hash
 
     def generate(self):
-        difficulty = min(3, max(0, int(self.option('difficulty'))));
+        difficulty = min(3, max(0, int(self.option('difficulty'))))
+        distortion = self.option('distortion')
         num_terms = max(1, int(self.option('num_terms')))
         max_num_terms = int(self.option('max_num_terms'))
         min_term = max(0, int(self.option('min_term')))
@@ -96,7 +98,7 @@ class SimpleCaptcha:
         self.hmac = createHash(str(self.option('secret_key')), str(self.option('secret_salt') if self.option('secret_salt') else '') + str(result))
 
         # create image captcha with formula depending on difficulty
-        captcha, width, height = self.image(formula, color, background, difficulty)
+        captcha, width, height = self.image(formula, color, background, difficulty, distortion)
 
         # output image
         self.captcha = imagepng(captcha, width, height)
@@ -166,7 +168,7 @@ class SimpleCaptcha:
 
         return (formula, result)
 
-    def image(self, chars, color, background, difficulty):
+    def image(self, chars, color, background, difficulty, distortion):
         bitmaps = self.chars()
 
         cw = bitmaps['width']
@@ -205,7 +207,7 @@ class SimpleCaptcha:
         if 0 < difficulty:
             # create distorted image data based on difficulty level
             phase = float(rand(0, 2)) * 3.14 / 2.0;
-            amplitude = 5.0 if 3 == difficulty else (3.0 if 2 == difficulty else 1.5)
+            amplitude = float(distortion[str(difficulty)]) if isinstance(distortion, dict) and (str(difficulty) in distortion) else (5.0 if 3 == difficulty else (3.0 if 2 == difficulty else 1.5))
             yw = 0
             for y in range(h):
                 y0 = y
