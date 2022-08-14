@@ -2,7 +2,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.0.0
+*   @version 2.1.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -30,7 +30,12 @@ var HAS = Object.prototype.hasOwnProperty,
 
 function rand(m, M)
 {
-    return Math.round(m + (M-m)*Math.random());
+    return Math.round(m + (M - m) * Math.random());
+}
+
+function split(s)
+{
+    return String(s).split('');
 }
 
 function hex(s)
@@ -91,7 +96,7 @@ async function imagepng(img, width, height, metaData)
 
 class SimpleCaptcha
 {
-    static VERSION = '2.0.0';
+    static VERSION = '2.1.0';
 
     opts = null;
     captcha = null;
@@ -103,8 +108,9 @@ class SimpleCaptcha
         this.opts = {};
         this.option('secret_key', 'SECRET_KEY');
         this.option('secret_salt', 'SECRET_SALT_');
-        this.option('difficulty', 1); // 1 (easy) to 3 (difficult)
+        this.option('difficulty', 1); // 0 (very easy) to 3 (more difficult)
         this.option('num_terms', 2); // default
+        this.option('max_num_terms', -1); // default, same as num_terms
         this.option('min_term', 1); // default
         this.option('max_term', 20); // default
         this.option('has_multiplication', true); // default
@@ -150,8 +156,9 @@ class SimpleCaptcha
     }
 
     async generate() {
-        var difficulty = Math.min(3, Math.max(1, parseInt(this.option('difficulty')))),
+        var difficulty = Math.min(3, Math.max(0, parseInt(this.option('difficulty')))),
             num_terms = Math.max(1, parseInt(this.option('num_terms'))),
+            max_num_terms = parseInt(this.option('max_num_terms')),
             min_term = Math.max(0, parseInt(this.option('min_term'))),
             max_term = Math.max(0, parseInt(this.option('max_term'))),
             has_mult = !!this.option('has_multiplication'),
@@ -161,6 +168,11 @@ class SimpleCaptcha
             background = parseInt(this.option('background')),
             formula, result, captcha, width, height
         ;
+
+        if (max_num_terms > num_terms)
+        {
+            num_terms = rand(num_terms, max_num_terms);
+        }
 
         // generate mathematical formula
         [formula, result] = this.formula(num_terms, min_term, max_term, has_mult, has_div, has_equal, difficulty);
@@ -196,7 +208,7 @@ class SimpleCaptcha
             else if (has_div && (0 === x % 2) && rand(0, 1))
             {
                 // randomly use division factor
-                divider = 0 === x % 6 ? rand(2, 3) : 2;
+                divider = 0 === x % 3 ? rand(2, 3) : 2;
             }
             if (0 < factor)
             {
@@ -204,16 +216,16 @@ class SimpleCaptcha
                 if (0 > x)
                 {
                     formula.push('-');
-                    formula.push.apply(formula, String(Math.abs(x)).split(''));
+                    formula.push.apply(formula, split(Math.abs(x)));
                     formula.push('×');
-                    formula.push.apply(formula, String(factor).split(''));
+                    formula.push.apply(formula, split(factor));
                 }
                 else
                 {
                     if (0 < i) formula.push('+');
-                    formula.push.apply(formula, String(x).split(''));
+                    formula.push.apply(formula, split(x));
                     formula.push('×');
-                    formula.push.apply(formula, String(factor).split(''));
+                    formula.push.apply(formula, split(factor));
                 }
             }
             else if (0 < divider)
@@ -222,16 +234,16 @@ class SimpleCaptcha
                 if (0 > x)
                 {
                     formula.push('-');
-                    formula.push.apply(formula, String(Math.abs(x)).split(''));
+                    formula.push.apply(formula, split(Math.abs(x)));
                     formula.push('÷');
-                    formula.push.apply(formula, String(divider).split(''));
+                    formula.push.apply(formula, split(divider));
                 }
                 else
                 {
                     if (0 < i) formula.push('+');
-                    formula.push.apply(formula, String(x).split(''));
+                    formula.push.apply(formula, split(x));
                     formula.push('÷');
-                    formula.push.apply(formula, String(divider).split(''));
+                    formula.push.apply(formula, split(divider));
                 }
             }
             else
@@ -240,12 +252,12 @@ class SimpleCaptcha
                 if (0 > x)
                 {
                     formula.push('-');
-                    formula.push.apply(formula, String(Math.abs(x)).split(''));
+                    formula.push.apply(formula, split(Math.abs(x)));
                 }
                 else
                 {
                     if (0 < i) formula.push('+');
-                    formula.push.apply(formula, String(x).split(''));
+                    formula.push.apply(formula, split(x));
                 }
             }
             factor = 0;
@@ -279,7 +291,7 @@ class SimpleCaptcha
             g = clamp((color >>> 8) & 0xff),
             b = clamp(color & 0xff),
             imgbmp = new Uint32Array(wh),
-            charbmp, img, c, i, x, y, alpha,
+            charbmp, img, c, i, x, y, yw, alpha,
             phase, amplitude
         ;
 
@@ -307,23 +319,44 @@ class SimpleCaptcha
             x0 += cw + space;
         }
 
-        // create distorted image data based on difficulty level
-        img = new Uint8Array(4*wh);
-        phase = rand(0, 2) * 3.14 / 2.0;
-        amplitude = 3 == difficulty ? 5.0 : (2 == difficulty ? 3.0 : 1.5);
-        for (y=0; y<h; ++y)
+        img = new Uint8Array(wh << 2);
+        if (0 < difficulty)
         {
-            y0 = y;
-            for (x=0; x<w; ++x)
+            // create distorted image data based on difficulty level
+            phase = rand(0, 2) * 3.14 / 2.0;
+            amplitude = 3 == difficulty ? 5.0 : (2 == difficulty ? 3.0 : 1.5);
+            for (y=0,yw=0; y<h; ++y,yw+=w)
             {
-                x0 = x;
-                y0 = Math.max(0, Math.min(h-1, Math.round(y + amplitude * Math.sin(phase + 6.28 * 2 * x / w))));
-                c = imgbmp[x0 + w*y0];
-                i = 4*(x + w*y);
-                img[i] = clamp((c >>> 16) & 0xff);
-                img[i+1] = clamp((c >>> 8) & 0xff);
-                img[i+2] = clamp(c & 0xff);
-                img[i+3] = 255;
+                y0 = y;
+                for (x=0; x<w; ++x)
+                {
+                    x0 = x;
+                    y0 = Math.max(0, Math.min(h-1, Math.round(y + amplitude * Math.sin(phase + 6.28 * 2 * x / w))));
+                    c = imgbmp[x0 + y0*w];
+                    i = ((x + yw) << 2);
+                    img[i  ] = clamp((c >>> 16) & 0xff);
+                    img[i+1] = clamp((c >>> 8) & 0xff);
+                    img[i+2] = clamp(c & 0xff);
+                    img[i+3] = 255;
+                }
+            }
+        }
+        else
+        {
+            // create non-distorted image data
+            //img = new Uint8Array(imgbmp.buffer);
+            for (y=0,yw=0; y<h; ++y,yw+=w)
+            {
+                for (x=0; x<w; ++x)
+                {
+                    i = x + yw;
+                    c = imgbmp[i];
+                    i = (i << 2);
+                    img[i  ] = clamp((c >>> 16) & 0xff);
+                    img[i+1] = clamp((c >>> 8) & 0xff);
+                    img[i+2] = clamp(c & 0xff);
+                    img[i+3] = 255;
+                }
             }
         }
 

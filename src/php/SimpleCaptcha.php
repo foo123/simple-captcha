@@ -3,7 +3,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.0.0
+*   @version 2.1.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -12,7 +12,7 @@ if (!class_exists('SimpleCaptcha', false))
 {
 class SimpleCaptcha
 {
-    const VERSION = '2.0.0';
+    const VERSION = '2.1.0';
 
     private $opts = null;
     private $captcha = null;
@@ -25,8 +25,9 @@ class SimpleCaptcha
         $this->opts = array();
         $this->option('secret_key', 'SECRET_KEY');
         $this->option('secret_salt', 'SECRET_SALT_');
-        $this->option('difficulty', 1); // 1 (easy) to 3 (difficult)
+        $this->option('difficulty', 1); // 0 (very easy) to 3 (more difficult)
         $this->option('num_terms', 2); // default
+        $this->option('max_num_terms', -1); // default, same as num_terms
         $this->option('min_term', 1); // default
         $this->option('max_term', 20); // default
         $this->option('has_multiplication', true); // default
@@ -79,8 +80,9 @@ class SimpleCaptcha
 
     private function generate()
     {
-        $difficulty = min(3, max(1, (int)$this->option('difficulty')));
+        $difficulty = min(3, max(0, (int)$this->option('difficulty')));
         $num_terms = max(1, (int)$this->option('num_terms'));
+        $max_num_terms = (int)$this->option('max_num_terms');
         $min_term = max(0, (int)$this->option('min_term'));
         $max_term = max(0, (int)$this->option('max_term'));
         $has_mult = (bool)$this->option('has_multiplication');
@@ -88,6 +90,11 @@ class SimpleCaptcha
         $has_equal = (bool)$this->option('has_equal_sign');
         $color = (int)$this->option('color');
         $background = (int)$this->option('background');
+
+        if ($max_num_terms > $num_terms)
+        {
+            $num_terms = mt_rand($num_terms, $max_num_terms);
+        }
 
         // generate mathematical formula
         list($formula, $result) = $this->formula($num_terms, $min_term, $max_term, $has_mult, $has_div, $has_equal, $difficulty);
@@ -132,7 +139,7 @@ class SimpleCaptcha
             elseif ($has_div && (0 == $x % 2) && mt_rand(0, 1))
             {
                 // randomly use division factor
-                $divider = (int)(0 == $x % 6 ? mt_rand(2, 3) : 2);
+                $divider = (int)(0 == $x % 3 ? mt_rand(2, 3) : 2);
             }
             if (0 < $factor)
             {
@@ -237,19 +244,34 @@ class SimpleCaptcha
             $x0 += $cw + $space;
         }
 
-        // create distorted GD image based on difficulty level
         $img = imagecreatetruecolor($w, $h);
-        $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
-        $amplitude = 3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5);
-        for ($y=0; $y<$h; ++$y)
+        if (0 < $difficulty)
         {
-            $y0 = $y;
-            for ($x=0; $x<$w; ++$x)
+            // create distorted GD image based on difficulty level
+            $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
+            $amplitude = 3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5);
+            for ($y=0; $y<$h; ++$y)
             {
-                $x0 = $x;
-                $y0 = max(0, min($h-1, round($y + $amplitude * sin($phase + 6.28 * 2 * $x / $w))));
-                $c = $imgbmp[$x0 + $w*$y0];
-                imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 0xff), $this->clamp(($c >> 8) & 0xff), $this->clamp($c & 0xff)));
+                $y0 = $y;
+                for ($x=0; $x<$w; ++$x)
+                {
+                    $x0 = $x;
+                    $y0 = max(0, min($h-1, round($y + $amplitude * sin($phase + 6.28 * 2 * $x / $w))));
+                    $c = $imgbmp[$x0 + $y0*$w];
+                    imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 0xff), $this->clamp(($c >> 8) & 0xff), $this->clamp($c & 0xff)));
+                }
+            }
+        }
+        else
+        {
+            // create non-distorted GD image
+            for ($y=0,$yw=0; $y<$h; ++$y,$yw+=$w)
+            {
+                for ($x=0; $x<$w; ++$x)
+                {
+                    $c = $imgbmp[$x + $yw];
+                    imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 0xff), $this->clamp(($c >> 8) & 0xff), $this->clamp($c & 0xff)));
+                }
             }
         }
 

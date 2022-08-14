@@ -2,7 +2,7 @@
 
 Simple, image-based, mathematical captcha, with increasing levels of difficulty for PHP, JavaScript, Python
 
-version **2.0.0**
+version **2.1.0**
 
 ![SimpleCaptcha](/simple-captcha.jpg)
 
@@ -33,8 +33,9 @@ version **2.0.0**
 $captcha = (new SimpleCaptcha())
     ->option('secret_key', 'SECRET_KEY')
     ->option('secret_salt', 'SECRET_SALT_')
-    ->option('difficulty', 1) // 1 (easy) to 3 (difficult)
+    ->option('difficulty', 1) // 0 (easy) to 3 (difficult)
     ->option('num_terms', 2)
+    ->option('max_num_terms', 4) // -1 means constant num_terms
     ->option('min_term', 1)
     ->option('max_term', 21)
     ->option('has_multiplication', true)

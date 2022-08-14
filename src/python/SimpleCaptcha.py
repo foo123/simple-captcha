@@ -2,7 +2,7 @@
 #   SimpleCaptcha
 #   Simple image-based macthematical captcha
 #
-#   @version 2.0.0
+#   @version 2.1.0
 #   https://github.com/foo123/simple-captcha
 #
 ##
@@ -26,7 +26,7 @@ class SimpleCaptcha:
     SimpleCaptcha
     https://github.com/foo123/simple-captcha
     """
-    VERSION = '2.0.0'
+    VERSION = '2.1.0'
 
     def __init__(self):
         self.captcha = None
@@ -34,8 +34,9 @@ class SimpleCaptcha:
         self.opts = {}
         self.option('secret_key', 'SECRET_KEY')
         self.option('secret_salt', 'SECRET_SALT_')
-        self.option('difficulty', 1) # 1 (easy) to 3 (difficult)
+        self.option('difficulty', 1) # 0 (very easy) to 3 (more difficult)
         self.option('num_terms', 2) # default
+        self.option('max_num_terms', -1) # default, same as num_terms
         self.option('min_term', 1) # default
         self.option('max_term', 20) # default
         self.option('has_multiplication', True) # default
@@ -74,8 +75,9 @@ class SimpleCaptcha:
         return hasha == hash
 
     def generate(self):
-        difficulty = min(3, max(1, int(self.option('difficulty'))));
+        difficulty = min(3, max(0, int(self.option('difficulty'))));
         num_terms = max(1, int(self.option('num_terms')))
+        max_num_terms = int(self.option('max_num_terms'))
         min_term = max(0, int(self.option('min_term')))
         max_term = max(0, int(self.option('max_term')))
         has_mult = bool(self.option('has_multiplication'))
@@ -83,6 +85,9 @@ class SimpleCaptcha:
         has_equal = bool(self.option('has_equal_sign'))
         color = int(self.option('color'))
         background = int(self.option('background'))
+
+        if max_num_terms > num_terms:
+            num_terms = rand(num_terms, max_num_terms)
 
         # generate mathematical formula
         formula, result = self.formula(num_terms, min_term, max_term, has_mult, has_div, has_equal, difficulty)
@@ -115,7 +120,7 @@ class SimpleCaptcha:
                 factor = rand(2, 3)
             elif has_div and (0 == x % 2) and rand(0, 1):
                 # randomly use division factor
-                divider = rand(2, 3) if 0 == x % 6 else 2
+                divider = rand(2, 3) if 0 == x % 3 else 2
 
             if 0 < factor:
                 result += x * factor
@@ -196,21 +201,37 @@ class SimpleCaptcha:
 
             x0 += cw + space
 
-        # create distorted image data based on difficulty level
-        img = [0] * (4*wh)
-        phase = float(rand(0, 2)) * 3.14 / 2.0;
-        amplitude = 5.0 if 3 == difficulty else (3.0 if 2 == difficulty else 1.5)
-        for y in range(h):
-            y0 = y
-            for x in range(w):
-                x0 = x
-                y0 = max(0, min(h-1, round(y + amplitude * math.sin(phase + 6.28 * 2.0 * x / w))))
-                c = imgbmp[x0 + w*y0]
-                i = 4*(x + w*y)
-                img[i] = clamp((c >> 16) & 0xff)
-                img[i+1] = clamp((c >> 8) & 0xff)
-                img[i+2] = clamp(c & 0xff)
-                img[i+3] = 255
+        img = [0] * (wh << 2)
+        if 0 < difficulty:
+            # create distorted image data based on difficulty level
+            phase = float(rand(0, 2)) * 3.14 / 2.0;
+            amplitude = 5.0 if 3 == difficulty else (3.0 if 2 == difficulty else 1.5)
+            yw = 0
+            for y in range(h):
+                y0 = y
+                for x in range(w):
+                    x0 = x
+                    y0 = max(0, min(h-1, round(y + amplitude * math.sin(phase + 6.28 * 2.0 * x / w))))
+                    c = imgbmp[x0 + y0*w]
+                    i = ((x + yw) << 2)
+                    img[i  ] = clamp((c >> 16) & 0xff)
+                    img[i+1] = clamp((c >> 8) & 0xff)
+                    img[i+2] = clamp(c & 0xff)
+                    img[i+3] = 255
+                yw += w
+        else:
+            # create non-distorted image data
+            yw = 0
+            for y in range(h):
+                for x in range(w):
+                    i = x + yw
+                    c = imgbmp[i]
+                    i = (i << 2)
+                    img[i  ] = clamp((c >> 16) & 0xff)
+                    img[i+1] = clamp((c >> 8) & 0xff)
+                    img[i+2] = clamp(c & 0xff)
+                    img[i+3] = 255
+                yw += w
 
         # free memory
         bitmaps = None
