@@ -3,7 +3,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.1.0
+*   @version 2.2.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -12,7 +12,7 @@ if (!class_exists('SimpleCaptcha', false))
 {
 class SimpleCaptcha
 {
-    const VERSION = '2.1.0';
+    const VERSION = '2.2.0';
 
     private $opts = null;
     private $captcha = null;
@@ -26,7 +26,8 @@ class SimpleCaptcha
         $this->option('secret_key', 'SECRET_KEY');
         $this->option('secret_salt', 'SECRET_SALT_');
         $this->option('difficulty', 1); // 0 (very easy) to 3 (more difficult)
-        $this->option('distortion', array('1'=>1.5,'2'=>3.0,'3'=>5.0)); // distortions by difficulty
+        $this->option('distortion_type', 1); // distortion type: 1: position distortion, 2: scale distortion
+        $this->option('distortion', null); // distortion amplitudes by difficulty
         $this->option('num_terms', 2); // default
         $this->option('max_num_terms', -1); // default, same as num_terms
         $this->option('min_term', 1); // default
@@ -82,6 +83,7 @@ class SimpleCaptcha
     private function generate()
     {
         $difficulty = min(3, max(0, (int)$this->option('difficulty')));
+        $distortion_type = min(2, max(0, (int)$this->option('distortion_type')));
         $distortion = $this->option('distortion');
         $num_terms = max(1, (int)$this->option('num_terms'));
         $max_num_terms = (int)$this->option('max_num_terms');
@@ -106,7 +108,7 @@ class SimpleCaptcha
         $this->hmac = hash_hmac($algo, (string)($this->option('secret_salt') ? $this->option('secret_salt') : '') . (string)$result, $this->option('secret_key'));
 
         // create image captcha with formula depending on difficulty
-        $captcha = $this->image($formula, $color, $background, $difficulty, $distortion);
+        $captcha = $this->image($formula, $color, $background, $difficulty, $distortion_type, $distortion);
 
         // output image
         ob_start(); imagepng($captcha);
@@ -204,7 +206,7 @@ class SimpleCaptcha
         return array($formula, $result);
     }
 
-    private function image($chars, $color, $background, $difficulty, $distortion)
+    private function image($chars, $color, $background, $difficulty, $distortion_type, $distortion)
     {
         $bitmaps = $this->chars();
 
@@ -217,12 +219,12 @@ class SimpleCaptcha
         $w = $n * $cw + ($n-1) * $space + 2 * $x0;
         $h = $ch + 2 * $y0;
 
-        $r0 = $this->clamp(($background >> 16) & 0xff);
-        $g0 = $this->clamp(($background >> 8) & 0xff);
+        $r0 = $this->clamp(($background >> 16) & 255);
+        $g0 = $this->clamp(($background >> 8) & 255);
         $b0 = $this->clamp($background & 0xff);
-        $r = $this->clamp(($color >> 16) & 0xff);
-        $g = $this->clamp(($color >> 8) & 0xff);
-        $b = $this->clamp($color & 0xff);
+        $r = $this->clamp(($color >> 16) & 255);
+        $g = $this->clamp(($color >> 8) & 255);
+        $b = $this->clamp($color & 255);
 
         // img bitmap
         $imgbmp = array_fill(0, $w*$h, (($r0 << 16) | ($g0 << 8) | ($b0)) & 0xffffffff);
@@ -247,21 +249,58 @@ class SimpleCaptcha
         }
 
         $img = imagecreatetruecolor($w, $h);
-        if (0 < $difficulty)
+        if ((0 < $difficulty) && (0 < $distortion_type))
         {
-            // create distorted GD image based on difficulty level
-            $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
-            $amplitude = is_array($distortion) && isset($distortion[(string)$difficulty]) ? (float)$distortion[(string)$difficulty] : (3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5));
-            for ($y=0; $y<$h; ++$y)
+            switch($distortion_type)
             {
-                $y0 = $y;
-                for ($x=0; $x<$w; ++$x)
-                {
-                    $x0 = $x;
-                    $y0 = max(0, min($h-1, round($y + $amplitude * sin($phase + 6.28 * 2 * $x / $w))));
-                    $c = $imgbmp[$x0 + $y0*$w];
-                    imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 0xff), $this->clamp(($c >> 8) & 0xff), $this->clamp($c & 0xff)));
-                }
+                case 2:
+                    // create scale-distorted GD image based on difficulty level
+                    $bg = imagecolorallocate($img, $r0, $g0, $b0);
+                    for ($y=0; $y<$h; ++$y)
+                    {
+                        for ($x=0; $x<$w; ++$x)
+                        {
+                            imagesetpixel($img, $x, $y, $bg);
+                        }
+                    }
+                    $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
+                    $amplitude = is_array($distortion) && isset($distortion[(string)$difficulty]) ? (float)$distortion[(string)$difficulty] : (3 == $difficulty ? 0.5 : (2 == $difficulty ? 0.25 : 0.15));
+                    $x0 = max(0, round(($w - $n*(1.0+$amplitude)*$cw - ($n-1)*$space) / 2));
+                    for ($k=0; $k<$n; ++$k)
+                    {
+                        $scale = (1.0 + $amplitude * sin($phase + 6.28 * 2 * $k / $n));
+                        $sw = min($w, round($scale * $cw));
+                        $sh = min($h, round($scale * $ch));
+                        $y0 = max(0, round(($h - $sh) / 2));
+                        for ($ys=0; $ys<$sh; ++$ys)
+                        {
+                            $y = max(0, min($h-1, round(10 + $ys / $scale)));
+                            for ($xs=0; $xs<$sw; ++$xs)
+                            {
+                                $x = max(0, min($w-1, round(10 + $k*($cw+$space) + $xs / $scale)));
+                                $c = $imgbmp[$x + $y*$w];
+                                imagesetpixel($img, $x0+$xs, $y0+$ys, imagecolorallocate($img, $this->clamp(($c >> 16) & 255), $this->clamp(($c >> 8) & 255), $this->clamp($c & 255)));
+                            }
+                        }
+                        $x0 += $space + $sw;
+                    }
+                    break;
+                case 1:
+                default:
+                    // create position-distorted GD image based on difficulty level
+                    $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
+                    $amplitude = is_array($distortion) && isset($distortion[(string)$difficulty]) ? (float)$distortion[(string)$difficulty] : (3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5));
+                    for ($y=0; $y<$h; ++$y)
+                    {
+                        $y0 = $y;
+                        for ($x=0; $x<$w; ++$x)
+                        {
+                            $x0 = $x;
+                            $y0 = max(0, min($h-1, round($y + $amplitude * sin($phase + 6.28 * 2 * $x / $w))));
+                            $c = $imgbmp[$x0 + $y0*$w];
+                            imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 255), $this->clamp(($c >> 8) & 255), $this->clamp($c & 255)));
+                        }
+                    }
             }
         }
         else
@@ -272,7 +311,7 @@ class SimpleCaptcha
                 for ($x=0; $x<$w; ++$x)
                 {
                     $c = $imgbmp[$x + $yw];
-                    imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 0xff), $this->clamp(($c >> 8) & 0xff), $this->clamp($c & 0xff)));
+                    imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 255), $this->clamp(($c >> 8) & 255), $this->clamp($c & 255)));
                 }
             }
         }

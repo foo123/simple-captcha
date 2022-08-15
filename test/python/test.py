@@ -23,12 +23,22 @@ else:
     pass
 
 def test():
-    # difficulty 0 (easy) to 3 (difficult)
     # max_num_terms -1 means constant num_terms
-    # distortion is image distortion based on difficulty
-    captcha = SimpleCaptcha().option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('difficulty', 2).option('distortion', {'2':4.0}).option('num_terms', 2).option('max_num_terms', 4).option('min_term', 1).option('max_term', 21).option('color', 0x121212).option('background', 0xffffff)
+    captcha = SimpleCaptcha().option('secret_key', 'SECRET_KEY').option('secret_salt', 'SECRET_SALT_').option('num_terms', 2).option('max_num_terms', 3).option('min_term', 1).option('max_term', 21).option('color', 0x121212).option('background', 0xffffff)
 
     captcha.reset()
+    captcha.option('difficulty', 2) # difficulty 0 (easy) to 3 (difficult)
+    captcha.option('distortion_type', 1) # 1: position distortion
+
+    print(captcha.getCaptcha())
+    print("\n")
+    print(captcha.getHash())
+
+    print("\n")
+
+    captcha.reset()
+    captcha.option('difficulty', 2) # difficulty 0 (easy) to 3 (difficult)
+    captcha.option('distortion_type', 2) # 2: scale distortion
 
     print(captcha.getCaptcha())
     print("\n")
