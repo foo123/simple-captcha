@@ -2,7 +2,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.2.0
+*   @version 2.5.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -29,75 +29,9 @@ var HAS = Object.prototype.hasOwnProperty,
         : function(s, n, p) {return s.length < n ? (new Array(n-s.length+1)).join(p) + s : s;}
 ;
 
-function rand(m, M)
-{
-    return stdMath.round(m + (M - m) * stdMath.random());
-}
-
-function split(s)
-{
-    return String(s).split('');
-}
-
-function hex(s)
-{
-    return String(s).split('').map(function(c) {return padStart(c.charCodeAt(0).toString(16), 8, '0');}).join('');
-}
-
-async function createHash(key, data)
-{
-    var hmac = '';
-    if (isNode)
-    {
-        try {
-            hmac = require('crypto').createHmac('sha256', key).update(data).digest('hex');
-        } catch (e) {
-            hmac = hex(data);
-        }
-    }
-    else if (isBrowser)
-    {
-        try {
-            hmac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', (new TextEncoder()).encode(data)))).map(function(b) {return padStart(b.toString(16), 2, '0');}).join('');
-        } catch (e) {
-            hmac = hex(data);
-        }
-    }
-    else
-    {
-        hmac = hex(data);
-    }
-    return hmac;
-}
-
-async function imagepng(img, width, height, metaData)
-{
-    metaData = metaData || {};
-    if (isNode)
-    {
-        return 'data:image/png;base64,' + (await (new PNGPacker(metaData)).toPNG(img, width, height)).toString('base64');
-    }
-    else if (isBrowser)
-    {
-        var canvas = document.createElement('canvas'),
-            ctx = canvas.getContext('2d'), imgData;
-
-        canvas.width = width;
-        canvas.height = height;
-
-        ctx.createImageData(width, height);
-        imgData = ctx.getImageData(0, 0, width, height);
-        imgData.data.set(img, 0);
-        ctx.putImageData(imgData, 0, 0);
-
-        return canvas.toDataURL('image/png');
-    }
-    return '';
-}
-
 class SimpleCaptcha
 {
-    static VERSION = '2.2.0';
+    static VERSION = '2.5.0';
 
     opts = null;
     captcha = null;
@@ -155,7 +89,7 @@ class SimpleCaptcha
     async validate(answer = null, hmac = null) {
         if ((null == answer) || (null == hmac)) return false;
         var hash = await createHash(String(this.option('secret_key')), String(this.option('secret_salt') ? this.option('secret_salt') : '') + String(answer));
-        return hash === hmac;
+        return hash_equals(hash, hmac);
     }
 
     async generate() {
@@ -169,10 +103,14 @@ class SimpleCaptcha
             has_mult = !!this.option('has_multiplication'),
             has_div = !!this.option('has_division'),
             has_equal = !!this.option('has_equal_sign'),
-            color = parseInt(this.option('color')),
-            background = parseInt(this.option('background')),
+            color = this.option('color'),
+            background = this.option('background'),
             formula, result, captcha, width, height
         ;
+        if (!is_array(color)) color = [color];
+        if (!is_array(background)) background = [background];
+        color = color.map(int);
+        background = background.map(int);
 
         if (max_num_terms > num_terms)
         {
@@ -288,28 +226,40 @@ class SimpleCaptcha
             w = n * cw + (n-1) * space + 2 * x0,
             h = ch + 2 * y0,
             wh = w*h, sw, sh,
-
-            r0 = clamp((background >>> 16) & 255),
-            g0 = clamp((background >>> 8) & 255),
-            b0 = clamp(background & 255),
-            r = clamp((color >>> 16) & 255),
-            g = clamp((color >>> 8) & 255),
-            b = clamp(color & 255),
+            r0, g0, b0, r, g, b,
             imgbmp = new Uint32Array(wh),
-            charbmp, img, c, i, j, k,
+            img = new Uint8Array(wh << 2),
+            charbmp, c, i, j, k,
+            x1, y1, x2, y2,
             x, y, yw, xs, ys, alpha,
             phase, amplitude, scale
         ;
 
         // img bitmap
-        for (c=((r0 << 16) | (g0 << 8) | (b0)) & 0xffffffff,i=0; i<wh; ++i)
-            imgbmp[i] = c;
+        x1 = 0;
+        y1 = h/2;
+        x2 = w-1;
+        y2 = h/2;
+        for (j=0,i=0,x=0,y=0; i<wh; ++i,++x,j+=4)
+        {
+            if (x >= w) {x = 0; ++y;}
+            c = colorAt(x, y, x1, y1, x2, y2, background);
+            imgbmp[i] = ((c[0] << 16) | (c[1] << 8) | (c[2])) & 0xffffffff;
+            img[j + 0] = c[0];
+            img[j + 1] = c[1];
+            img[j + 2] = c[2];
+            img[j + 3] = 255;
+        }
 
         // render chars
         for (i=0; i<n; ++i)
         {
             c = chars[i];
             charbmp = bitmaps.chars[c].bitmap;
+            x1 = 0;
+            y1 = rand(0, ch-1);
+            x2 = cw-1;
+            y2 = rand(0, ch-1);
             for (x=0; x<cw; ++x)
             {
                 for (y=0; y<ch; ++y)
@@ -318,28 +268,28 @@ class SimpleCaptcha
                     if (0 < alpha)
                     {
                         alpha = alpha / 255.0;
-                        imgbmp[x0+x + w*(y0+y)] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff;
+                        j = x0+x + w*(y0+y);
+                        c = imgbmp[j];
+                        r0 = (c >>> 16) & 255;
+                        g0 = (c >>> 8) & 255;
+                        b0 = (c) & 255;
+                        c = colorAt(x, y, x1, y1, x2, y2, color);
+                        r = c[0];
+                        g = c[1];
+                        b = c[2];
+                        imgbmp[j] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff;
                     }
                 }
             }
             x0 += cw + space;
         }
 
-        img = new Uint8Array(wh << 2);
         if ((0 < difficulty) && (0 < distortion_type))
         {
             switch(distortion_type)
             {
                 case 2:
                     // create scale-distorted image data based on difficulty level
-                    for (j=0; j<wh; ++j)
-                    {
-                        i = j << 2;
-                        img[i  ] = r0;
-                        img[i+1] = g0;
-                        img[i+2] = b0;
-                        img[i+3] = 255;
-                    }
                     phase = rand(0, 2) * 3.14 / 2.0;
                     amplitude = distortion && ('object' === typeof distortion) && HAS.call(distortion, String(difficulty)) ? parseFloat(distortion[String(difficulty)]) : (3 === difficulty ? 0.5 : (2 === difficulty ? 0.25 : 0.15));
                     x0 = stdMath.max(0, stdMath.round((w - n*(1.0+amplitude)*cw - (n-1)*space) / 2));
@@ -382,7 +332,7 @@ class SimpleCaptcha
                             img[i  ] = clamp((c >>> 16) & 255);
                             img[i+1] = clamp((c >>> 8) & 255);
                             img[i+2] = clamp(c & 255);
-                            img[i+3] = 255;
+                            //img[i+3] = 255;
                         }
                     }
             }
@@ -390,7 +340,6 @@ class SimpleCaptcha
         else
         {
             // create non-distorted image data
-            //img = new Uint8Array(imgbmp.buffer);
             for (y=0,yw=0; y<h; ++y,yw+=w)
             {
                 for (x=0; x<w; ++x)
@@ -401,7 +350,7 @@ class SimpleCaptcha
                     img[i  ] = clamp((c >>> 16) & 255);
                     img[i+1] = clamp((c >>> 8) & 255);
                     img[i+2] = clamp(c & 255);
-                    img[i+3] = 255;
+                    //img[i+3] = 255;
                 }
             }
         }
@@ -412,6 +361,137 @@ class SimpleCaptcha
 
         return [img, w, h];
     }
+}
+
+function rand(m, M)
+{
+    return stdMath.round(m + (M - m) * stdMath.random());
+}
+
+function split(s)
+{
+    return String(s).split('');
+}
+
+function hex(s)
+{
+    return String(s).split('').map(function(c) {return padStart(c.charCodeAt(0).toString(16), 8, '0');}).join('');
+}
+
+function is_array(x)
+{
+    return '[object Array]' === toString.call(x);
+}
+
+function int(x)
+{
+    return parseInt(x);
+}
+
+function hash_equals(h1, h2)
+{
+    var n1 = h1.length, n2 = h2.length,
+        n = stdMath.max(n1, n2), i, res = true;
+    for (i=0; i<n; ++i)
+    {
+        if (i >= n1)
+        {
+            res = res && false;
+        }
+        else if (i >= n2)
+        {
+            res = res && false;
+        }
+        else
+        {
+            res = res && (h1.charAt(i) === h2.charAt(i));
+        }
+    }
+    return res;
+}
+
+async function createHash(key, data)
+{
+    var hmac = '';
+    if (isNode)
+    {
+        try {
+            hmac = require('crypto').createHmac('sha256', key).update(data).digest('hex');
+        } catch (e) {
+            hmac = hex(data);
+        }
+    }
+    else if (isBrowser)
+    {
+        try {
+            hmac = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', (new TextEncoder()).encode(data)))).map(function(b) {return padStart(b.toString(16), 2, '0');}).join('');
+        } catch (e) {
+            hmac = hex(data);
+        }
+    }
+    else
+    {
+        hmac = hex(data);
+    }
+    return hmac;
+}
+
+async function imagepng(img, width, height, metaData)
+{
+    metaData = metaData || {};
+    if (isNode)
+    {
+        return 'data:image/png;base64,' + (await (new PNGPacker(metaData)).toPNG(img, width, height)).toString('base64');
+    }
+    else if (isBrowser)
+    {
+        var canvas = document.createElement('canvas'),
+            ctx = canvas.getContext('2d'), imgData;
+
+        canvas.width = width;
+        canvas.height = height;
+
+        ctx.createImageData(width, height);
+        imgData = ctx.getImageData(0, 0, width, height);
+        imgData.data.set(img, 0);
+        ctx.putImageData(imgData, 0, 0);
+
+        return canvas.toDataURL('image/png');
+    }
+    return '';
+}
+
+function colorAt(x, y, x1, y1, x2, y2, colors)
+{
+    // linear gradient interpolation between colors
+    var dx = x2 - x1, dy = y2 - y1,
+        vert = 0 === dx, hor = 0 === dy, f = 2*dx*dy,
+        t, px, py, c0, c1, l = colors.length - 1, rgb0, rgb1;
+    px = x - x1; py = y - y1;
+    t = hor && vert ? 0 : (vert ? py/dy : (hor ? px/dx : (px*dy + py*dx)/f));
+    if (0 >= t)
+    {
+        c0 = c1 = 0;
+        t = 0;
+    }
+    else if (1 <= t)
+    {
+        c0 = c1 = l;
+        t = 1;
+    }
+    else
+    {
+        c0 = stdMath.floor(l*t);
+        c1 = l === c0 ? c0 : (c0 + 1);
+    }
+    rgb0 = colors[c0];
+    rgb1 = colors[c1];
+    t = c1 > c0 ? (l*t - c0)/(c1 - c0) : t;
+    return [
+    clamp((1-t)*((rgb0 >>> 16) & 255) + t*((rgb1 >>> 16) & 255)),
+    clamp((1-t)*((rgb0 >>> 8) & 255) + t*((rgb1 >>> 8) & 255)),
+    clamp((1-t)*((rgb0) & 255) + t*((rgb1) & 255))
+    ];
 }
 
 function _chars()

@@ -3,7 +3,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.2.0
+*   @version 2.5.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -12,7 +12,7 @@ if (!class_exists('SimpleCaptcha', false))
 {
 class SimpleCaptcha
 {
-    const VERSION = '2.2.0';
+    const VERSION = '2.5.0';
 
     private $opts = null;
     private $captcha = null;
@@ -92,8 +92,13 @@ class SimpleCaptcha
         $has_mult = (bool)$this->option('has_multiplication');
         $has_div = (bool)$this->option('has_division');
         $has_equal = (bool)$this->option('has_equal_sign');
-        $color = (int)$this->option('color');
-        $background = (int)$this->option('background');
+        $color = $this->option('color');
+        $background = $this->option('background');
+
+        if (!is_array($color)) $color = array($color);
+        if (!is_array($background)) $background = array($background);
+        $color = array_map(array($this, 'int'), $color);
+        $background = array_map(array($this, 'int'), $background);
 
         if ($max_num_terms > $num_terms)
         {
@@ -218,21 +223,30 @@ class SimpleCaptcha
         $y0 = 10;
         $w = $n * $cw + ($n-1) * $space + 2 * $x0;
         $h = $ch + 2 * $y0;
-
-        $r0 = $this->clamp(($background >> 16) & 255);
-        $g0 = $this->clamp(($background >> 8) & 255);
-        $b0 = $this->clamp($background & 0xff);
-        $r = $this->clamp(($color >> 16) & 255);
-        $g = $this->clamp(($color >> 8) & 255);
-        $b = $this->clamp($color & 255);
+        $wh = $w*$h;
 
         // img bitmap
-        $imgbmp = array_fill(0, $w*$h, (($r0 << 16) | ($g0 << 8) | ($b0)) & 0xffffffff);
+        $imgbmp = array_fill(0, $wh, 0);
+        $img = imagecreatetruecolor($w, $h);
+        $x1 = 0;
+        $y1 = $h/2;
+        $x2 = $w-1;
+        $y2 = $h/2;
+        for ($i=0,$x=0,$y=0; $i<$wh; ++$i,++$x)
+        {
+            if ($x >= $w) {$x = 0; ++$y;}
+            $c = $this->colorAt($x, $y, $x1, $y1, $x2, $y2, $background);
+            $imgbmp[$i] = (($c[0] << 16) | ($c[1] << 8) | ($c[2])) & 0xffffffff;
+            imagesetpixel($img, $x, $y, imagecolorallocate($img, $c[0], $c[1], $c[2]));        }
 
         // render chars
         foreach ($chars as $char)
         {
             $charbmp =& $bitmaps['chars'][$char]['bitmap'];
+            $x1 = 0;
+            $y1 = rand(0, $ch-1);
+            $x2 = $cw-1;
+            $y2 = rand(0, $ch-1);
             for ($x=0; $x<$cw; ++$x)
             {
                 for ($y=0; $y<$ch; ++$y)
@@ -241,28 +255,28 @@ class SimpleCaptcha
                     if (0 < $alpha)
                     {
                         $alpha = (float)$alpha / 255.0;
-                        $imgbmp[$x0+$x + $w*($y0+$y)] = (($this->clamp($r0*(1-$alpha) + $alpha*$r) << 16) | ($this->clamp($g0*(1-$alpha) + $alpha*$g) << 8) | ($this->clamp($b0*(1-$alpha) + $alpha*$b))) & 0xffffffff;
+                        $j = $x0+$x + $w*($y0+$y);
+                        $c = $imgbmp[$j];
+                        $r0 = ($c >> 16) & 255;
+                        $g0 = ($c >>> 8) & 255;
+                        $b0 = ($c) & 255;
+                        $c = $this->colorAt($x, $y, $x1, $y1, $x2, $y2, $color);
+                        $r = $c[0];
+                        $g = $c[1];
+                        $b = $c[2];
+                        $imgbmp[$j] = (($this->clamp($r0*(1-$alpha) + $alpha*$r) << 16) | ($this->clamp($g0*(1-$alpha) + $alpha*$g) << 8) | ($this->clamp($b0*(1-$alpha) + $alpha*$b))) & 0xffffffff;
                     }
                 }
             }
             $x0 += $cw + $space;
         }
 
-        $img = imagecreatetruecolor($w, $h);
         if ((0 < $difficulty) && (0 < $distortion_type))
         {
             switch($distortion_type)
             {
                 case 2:
                     // create scale-distorted GD image based on difficulty level
-                    $bg = imagecolorallocate($img, $r0, $g0, $b0);
-                    for ($y=0; $y<$h; ++$y)
-                    {
-                        for ($x=0; $x<$w; ++$x)
-                        {
-                            imagesetpixel($img, $x, $y, $bg);
-                        }
-                    }
                     $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
                     $amplitude = is_array($distortion) && isset($distortion[(string)$difficulty]) ? (float)$distortion[(string)$difficulty] : (3 == $difficulty ? 0.5 : (2 == $difficulty ? 0.25 : 0.15));
                     $x0 = max(0, round(($w - $n*(1.0+$amplitude)*$cw - ($n-1)*$space) / 2));
@@ -321,6 +335,48 @@ class SimpleCaptcha
         $imgbmp = null;
 
         return $img;
+    }
+
+    private function colorAt($x, $y, $x1, $y1, $x2, $y2, $colors)
+    {
+        // linear gradient interpolation between colors
+        $dx = $x2 - $x1;
+        $dy = $y2 - $y1;
+        $vert = 0 == $dx;
+        $hor = 0 == $dy;
+        $f = 2*$dx*$dy;
+        $l = count($colors) - 1;
+        $px = $x - $x1;
+        $py = $y - $y1;
+        $t = $hor && $vert ? 0 : ($vert ? $py/$dy : ($hor ? $px/$dx : ($px*$dy + $py*$dx)/$f));
+        if (0 >= $t)
+        {
+            $c0 = $c1 = 0;
+            $t = 0;
+        }
+        elseif (1 <= $t)
+        {
+            $c0 = $c1 = $l;
+            $t = 1;
+        }
+        else
+        {
+            $c0 = floor($l*$t);
+            $c1 = $l == $c0 ? $c0 : ($c0 + 1);
+        }
+        $rgb0 = $colors[$c0];
+        $rgb1 = $colors[$c1];
+        $t = $c1 > $c0 ? ($l*$t - $c0)/($c1 - $c0) : $t;
+        return array(
+        $this->clamp((1-$t)*(($rgb0 >> 16) & 255) + $t*(($rgb1 >> 16) & 255)),
+        $this->clamp((1-$t)*(($rgb0 >> 8) & 255) + $t*(($rgb1 >> 8) & 255)),
+        $this->clamp((1-$t)*(($rgb0) & 255) + $t*(($rgb1) & 255))
+        );
+    }
+
+    public function int($x)
+    {
+        return (int)$x;
     }
 
     private function clamp($value)

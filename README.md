@@ -2,7 +2,7 @@
 
 Simple, image-based, mathematical captcha, with increasing levels of difficulty for PHP, JavaScript, Python
 
-version **2.2.0**
+version **2.5.0** in progress
 
 ![SimpleCaptcha](/simple-captcha.jpg)
 

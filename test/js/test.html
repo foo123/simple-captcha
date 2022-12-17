@@ -24,6 +24,8 @@ async function test(img1, pre1, img2, pre2)
     captcha.reset();
     captcha.option('difficulty', 2); // 0 (easy) to 3 (difficult)
     captcha.option('distortion_type', 1); // 1: position distortion
+    captcha.option('color', [0x121212, 0xff0012]) // text color gradient
+    captcha.option('background', 0x1Da1C1) // background color
 
     img1.src = await captcha.getCaptcha();
     document.body.appendChild(img1);
@@ -34,6 +36,8 @@ async function test(img1, pre1, img2, pre2)
     captcha.reset();
     captcha.option('difficulty', 2); // 0 (easy) to 3 (difficult)
     captcha.option('distortion_type', 2); // 2: scale distortion
+    captcha.option('color', 0xffffff) // text color
+    captcha.option('background', [0xff0000, 0xffff00, 0x00ff00, 0x0000ff]) // background color gradient
 
     img2.src = await captcha.getCaptcha();
     document.body.appendChild(img2);
@@ -44,6 +48,6 @@ async function test(img1, pre1, img2, pre2)
 
 console.log('SimpleCaptcha.VERSION ' + SimpleCaptcha.VERSION);
 
-test(document.createElement('img'), document.createElement('pre'),document.createElement('img'), document.createElement('pre'));
+test(document.createElement('img'), document.createElement('pre'), document.createElement('img'), document.createElement('pre'));
 </script>
 </body></html>

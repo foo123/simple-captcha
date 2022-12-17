@@ -2,31 +2,18 @@
 #   SimpleCaptcha
 #   Simple image-based macthematical captcha
 #
-#   @version 2.2.0
+#   @version 2.5.0
 #   https://github.com/foo123/simple-captcha
 #
 ##
 import math, random, base64, hmac, hashlib, zlib, struct
-
-def rand(m, M):
-    return random.randrange(m, M+1)
-
-def split(s):
-    return [c for c in str(s)]
-
-def createHash(key, data):
-    return str(hmac.new(bytes(str(key), 'utf-8'), msg=bytes(str(data), 'utf-8'), digestmod=hashlib.sha256).hexdigest())
-
-def imagepng(img, width, height, metaData=dict()):
-    return 'data:image/png;base64,' + base64.b64encode(PNGPacker(metaData).toPNG(img, width, height)).decode("ascii")
-
 
 class SimpleCaptcha:
     """
     SimpleCaptcha
     https://github.com/foo123/simple-captcha
     """
-    VERSION = '2.2.0'
+    VERSION = '2.5.0'
 
     def __init__(self):
         self.captcha = None
@@ -71,10 +58,10 @@ class SimpleCaptcha:
         self.hmac = None
         return self
 
-    def validate(self, answer = None, hash = None):
-        if (answer is None) or (hash is None): return False
-        hasha = createHash(str(self.option('secret_key')), str(self.option('secret_salt') if this.option('secret_salt') else '') + str(answer))
-        return hasha == hash
+    def validate(self, answer = None, hmac = None):
+        if (answer is None) or (hmac is None): return False
+        hash = createHash(str(self.option('secret_key')), str(self.option('secret_salt') if self.option('secret_salt') else '') + str(answer))
+        return hash_equals(hash, hmac)
 
     def generate(self):
         difficulty = min(3, max(0, int(self.option('difficulty'))))
@@ -87,8 +74,13 @@ class SimpleCaptcha:
         has_mult = bool(self.option('has_multiplication'))
         has_div = bool(self.option('has_division'))
         has_equal = bool(self.option('has_equal_sign'))
-        color = int(self.option('color'))
-        background = int(self.option('background'))
+        color = self.option('color')
+        background = self.option('background')
+
+        if not isinstance(color, list): color = [color]
+        if not isinstance(background, list): background = [background]
+        color = list(map(lambda x: int(x), color))
+        background = list(map(lambda x: int(x), background))
 
         if max_num_terms > num_terms:
             num_terms = rand(num_terms, max_num_terms)
@@ -183,39 +175,57 @@ class SimpleCaptcha:
         h = ch + 2 * y0
         wh = w*h
 
-        r0 = clamp((background >> 16) & 255)
-        g0 = clamp((background >> 8) & 255)
-        b0 = clamp(background & 255)
-        r = clamp((color >> 16) & 255)
-        g = clamp((color >> 8) & 255)
-        b = clamp(color & 255)
-
         # img bitmap
-        imgbmp = [((r0 << 16) | (g0 << 8) | (b0)) & 0xffffffff] * wh
+        imgbmp = [0] * wh
+        img = [0] * (wh << 2)
+        x1 = 0
+        y1 = h/2
+        x2 = w-1
+        y2 = h/2
+        x = 0
+        y = 0;
+        j = 0;
+        for i in range(wh):
+            if x >= w:
+                x = 0
+                y += 1
+            c = colorAt(x, y, x1, y1, x2, y2, background)
+            imgbmp[i] = ((c[0] << 16) | (c[1] << 8) | (c[2])) & 0xffffffff
+            j = i << 2;
+            img[j + 0] = c[0]
+            img[j + 1] = c[1]
+            img[j + 2] = c[2]
+            img[j + 3] = 255
+            x += 1
 
         # render chars
         for c in chars:
             charbmp = bitmaps['chars'][c]['bitmap']
+            x1 = 0
+            y1 = rand(0, ch-1)
+            x2 = cw-1
+            y2 = rand(0, ch-1)
             for x in range(cw):
                 for y in range(ch):
                     alpha = charbmp[x + cw*y]
                     if 0 < alpha:
                         alpha = float(alpha) / 255.0
-                        imgbmp[x0+x + w*(y0+y)] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff
+                        j = x0+x + w*(y0+y)
+                        c = imgbmp[j]
+                        r0 = (c >> 16) & 255
+                        g0 = (c >> 8) & 255
+                        b0 = (c) & 255
+                        c = colorAt(x, y, x1, y1, x2, y2, color)
+                        r = c[0]
+                        g = c[1]
+                        b = c[2]
+                        imgbmp[j] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff
 
             x0 += cw + space
 
-        img = [0] * (wh << 2)
         if (0 < difficulty) and (0 < distortion_type):
             if 2 == distortion_type:
                 # create scale-distorted image data based on difficulty level
-                for j in range(wh):
-                    i = j << 2
-                    img[i  ] = r0
-                    img[i+1] = g0
-                    img[i+2] = b0
-                    img[i+3] = 255
-
                 phase = float(rand(0, 2)) * 3.14 / 2.0
                 amplitude = float(distortion[str(difficulty)]) if isinstance(distortion, dict) and (str(difficulty) in distortion) else (0.5 if 3 == difficulty else (0.25 if 2 == difficulty else 0.15))
                 x0 = max(0, round((w - n*(1.0+amplitude)*cw - (n-1)*space) / 2))
@@ -249,7 +259,7 @@ class SimpleCaptcha:
                         img[i  ] = clamp((c >> 16) & 255)
                         img[i+1] = clamp((c >> 8) & 255)
                         img[i+2] = clamp(c & 255)
-                        img[i+3] = 255
+                        #img[i+3] = 255
                     yw += w
         else:
             # create non-distorted image data
@@ -258,11 +268,11 @@ class SimpleCaptcha:
                 for x in range(w):
                     i = x + yw
                     c = imgbmp[i]
-                    i = (i << 2)
-                    img[i  ] = clamp((c >> 16) & 255)
-                    img[i+1] = clamp((c >> 8) & 255)
-                    img[i+2] = clamp(c & 255)
-                    img[i+3] = 255
+                    j = (i << 2)
+                    img[j  ] = clamp((c >> 16) & 255)
+                    img[j+1] = clamp((c >> 8) & 255)
+                    img[j+2] = clamp(c & 255)
+                    #img[j+3] = 255
                 yw += w
 
         # free memory
@@ -272,6 +282,60 @@ class SimpleCaptcha:
         return (img, w, h)
 
 
+def rand(m, M):
+    return random.randrange(m, M+1)
+
+def split(s):
+    return [c for c in str(s)]
+
+def hash_equals(h1, h2):
+    n1 = len(h1)
+    n2 = len(h2)
+    n = max(n1, n2)
+    res = True
+    for i in range(n):
+        if i >= n1:
+            res = res and False
+        elif i >= n2:
+            res = res and False
+        else:
+            res = res and (h1[i] == h2[i])
+    return res
+
+def createHash(key, data):
+    return str(hmac.new(bytes(str(key), 'utf-8'), msg=bytes(str(data), 'utf-8'), digestmod=hashlib.sha256).hexdigest())
+
+def imagepng(img, width, height, metaData=dict()):
+    return 'data:image/png;base64,' + base64.b64encode(PNGPacker(metaData).toPNG(img, width, height)).decode("ascii")
+
+def colorAt(x, y, x1, y1, x2, y2, colors):
+    # linear gradient interpolation between colors
+    dx = x2 - x1
+    dy = y2 - y1
+    vert = 0 == dx
+    hor = 0 == dy
+    f = 2*dx*dy
+    l = len(colors) - 1
+    px = x - x1
+    py = y - y1
+    t = 0 if hor and vert else (py/dy if vert else (px/dx if hor else (px*dy + py*dx)/f))
+    if 0 >= t:
+        c0 = c1 = 0
+        t = 0
+    elif 1 <= t:
+        c0 = c1 = l
+        t = 1
+    else:
+        c0 = stdMath.floor(l*t)
+        c1 = c0 if l == c0 else (c0 + 1)
+    rgb0 = colors[c0]
+    rgb1 = colors[c1]
+    t = (l*t - c0)/(c1 - c0) if c1 > c0 else t
+    return [
+    clamp((1-t)*((rgb0 >> 16) & 255) + t*((rgb1 >> 16) & 255)),
+    clamp((1-t)*((rgb0 >> 8) & 255) + t*((rgb1 >> 8) & 255)),
+    clamp((1-t)*((rgb0) & 255) + t*((rgb1) & 255))
+    ]
 
 def _chars():
     return {
