@@ -2,7 +2,7 @@
 
 Simple, image-based, mathematical captcha, with increasing levels of difficulty for PHP, JavaScript, Python
 
-version **2.5.0** in progress
+version **2.5.0**
 
 ![SimpleCaptcha](/simple-captcha.jpg)
 
@@ -30,6 +30,8 @@ version **2.5.0** in progress
 
 1. Captcha with Position Distortion: ![Captcha with Position Distortion](/captcha-position.png)
 2. Captcha with Scale Distortion: ![Captcha with Scale Distortion](/captcha-scale.png)
+3. Captcha with Gradient Background: ![Captcha with Gradient Background](/captcha-gradient.png)
+4. Captcha with custom pattern background: ![Captcha custom pattern background](/captcha-pattern.png)
 
 
 ```php

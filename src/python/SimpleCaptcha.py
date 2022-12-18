@@ -77,10 +77,10 @@ class SimpleCaptcha:
         color = self.option('color')
         background = self.option('background')
 
-        if not isinstance(color, list): color = [color]
-        if not isinstance(background, list): background = [background]
-        color = list(map(lambda x: int(x), color))
-        background = list(map(lambda x: int(x), background))
+        if (not isinstance(color, list)) and (not isinstance(color, dict)): color = [color]
+        if (not isinstance(background, list)) and (not isinstance(background, dict)): background = [background]
+        if isinstance(color, list): color = list(map(lambda x: int(x), color))
+        if isinstance(background, list): background = list(map(lambda x: int(x), background))
 
         if max_num_terms > num_terms:
             num_terms = rand(num_terms, max_num_terms)
@@ -176,7 +176,7 @@ class SimpleCaptcha:
         wh = w*h
 
         # img bitmap
-        imgbmp = [0] * wh
+        imgb = [0] * wh
         img = [0] * (wh << 2)
         x1 = 0
         y1 = h/2
@@ -189,8 +189,7 @@ class SimpleCaptcha:
             if x >= w:
                 x = 0
                 y += 1
-            c = colorAt(x, y, x1, y1, x2, y2, background)
-            imgbmp[i] = ((c[0] << 16) | (c[1] << 8) | (c[2])) & 0xffffffff
+            c = colorAt(x, y, background, x1, y1, x2, y2)
             j = i << 2;
             img[j + 0] = c[0]
             img[j + 1] = c[1]
@@ -209,17 +208,7 @@ class SimpleCaptcha:
                 for y in range(ch):
                     alpha = charbmp[x + cw*y]
                     if 0 < alpha:
-                        alpha = float(alpha) / 255.0
-                        j = x0+x + w*(y0+y)
-                        c = imgbmp[j]
-                        r0 = (c >> 16) & 255
-                        g0 = (c >> 8) & 255
-                        b0 = (c) & 255
-                        c = colorAt(x, y, x1, y1, x2, y2, color)
-                        r = c[0]
-                        g = c[1]
-                        b = c[2]
-                        imgbmp[j] = ((clamp(r0*(1-alpha) + alpha*r) << 16) | (clamp(g0*(1-alpha) + alpha*g) << 8) | (clamp(b0*(1-alpha) + alpha*b))) & 0xffffffff
+                        imgb[x0+x + w*(y0+y)] = alpha
 
             x0 += cw + space
 
@@ -234,50 +223,75 @@ class SimpleCaptcha:
                     sw = min(w, round(scale * cw))
                     sh = min(h, round(scale * ch))
                     y0 = max(0, round((h - sh) / 2))
+                    x1 = 0
+                    y1 = sh/2
+                    x2 = sw
+                    y2 = sh/2
                     for ys in range(sh):
                         y = max(0, min(h-1, round(10 + ys / scale)))
                         for xs in range(sw):
                             x = max(0, min(w-1, round(10 + k*(cw+space) + xs / scale)))
-                            c = imgbmp[x + y*w]
-                            j = ((x0+xs + (y0+ys)*w) << 2)
-                            img[j  ] = clamp((c >> 16) & 255)
-                            img[j+1] = clamp((c >> 8) & 255)
-                            img[j+2] = clamp(c & 255)
+                            alpha = imgb[x + y*w]
+                            if 0 < alpha:
+                                alpha /= 255.0
+                                c = colorAt(xs, ys, color, x1, y1, x2, y2)
+                                j = ((x0+xs + (y0+ys)*w) << 2)
+                                img[j  ] = clamp(img[j  ]*(1-alpha) + alpha*c[0])
+                                img[j+1] = clamp(img[j+1]*(1-alpha) + alpha*c[1])
+                                img[j+2] = clamp(img[j+2]*(1-alpha) + alpha*c[2])
                     x0 += space + sw
             else:
                 # create position-distorted image data based on difficulty level
                 phase = float(rand(0, 2)) * 3.14 / 2.0
                 amplitude = float(distortion[str(difficulty)]) if isinstance(distortion, dict) and (str(difficulty) in distortion) else (5.0 if 3 == difficulty else (3.0 if 2 == difficulty else 1.5))
                 yw = 0
+                x1 = 0
+                y1 = ch/2
+                x2 = cw
+                y2 = ch/2
                 for y in range(h):
                     y0 = y
                     for x in range(w):
                         x0 = x
                         y0 = max(0, min(h-1, round(y + amplitude * math.sin(phase + 6.28 * 2.0 * x / w))))
-                        c = imgbmp[x0 + y0*w]
-                        i = ((x + yw) << 2)
-                        img[i  ] = clamp((c >> 16) & 255)
-                        img[i+1] = clamp((c >> 8) & 255)
-                        img[i+2] = clamp(c & 255)
-                        #img[i+3] = 255
+                        alpha = imgb[x0 + y0*w]
+                        if 0 < alpha:
+                            alpha /= 255.0
+                            xc = x - 10 + space - math.floor((x - 10 + space)/(cw + space))*(cw + space)
+                            yc = y - 10
+                            c = colorAt(xc, yc, color, x1, y1, x2, y2)
+                            j = ((x + yw) << 2)
+                            img[j  ] = clamp(img[j  ]*(1-alpha) + alpha*c[0])
+                            img[j+1] = clamp(img[j+1]*(1-alpha) + alpha*c[1])
+                            img[j+2] = clamp(img[j+2]*(1-alpha) + alpha*c[2])
                     yw += w
         else:
             # create non-distorted image data
+            x1 = 0
+            y1 = ch/2
+            x2 = cw
+            y2 = ch/2
             yw = 0
             for y in range(h):
                 for x in range(w):
                     i = x + yw
-                    c = imgbmp[i]
-                    j = (i << 2)
-                    img[j  ] = clamp((c >> 16) & 255)
-                    img[j+1] = clamp((c >> 8) & 255)
-                    img[j+2] = clamp(c & 255)
-                    #img[j+3] = 255
+                    alpha = imgb[i]
+                    if 0 < alpha:
+                        alpha /= 255.0
+                        # x = x0 + i*cw + (i-1)*space + xc
+                        # xc = x - x0 + space - i*(cw + space)
+                        xc = x - 10 + space - math.floor((x - 10 + space)/(cw + space))*(cw + space)
+                        yc = y - 10
+                        c = colorAt(xc, yc, color, x1, y1, x2, y2)
+                        j = (i << 2)
+                        img[j  ] = clamp(img[j  ]*(1-alpha) + alpha*c[0])
+                        img[j+1] = clamp(img[j+1]*(1-alpha) + alpha*c[1])
+                        img[j+2] = clamp(img[j+2]*(1-alpha) + alpha*c[2])
                 yw += w
 
         # free memory
         bitmaps = None
-        imgbmp = None
+        imgb = None
 
         return (img, w, h)
 
@@ -308,7 +322,9 @@ def createHash(key, data):
 def imagepng(img, width, height, metaData=dict()):
     return 'data:image/png;base64,' + base64.b64encode(PNGPacker(metaData).toPNG(img, width, height)).decode("ascii")
 
-def colorAt(x, y, x1, y1, x2, y2, colors):
+def colorAt(x, y, colors, x1, y1, x2, y2):
+    if isinstance(colors, dict) and ('image' in colors) and ('width' in colors) and ('height' in colors):
+        return patternAt(x, y, colors)
     # linear gradient interpolation between colors
     dx = x2 - x1
     dy = y2 - y1
@@ -326,7 +342,7 @@ def colorAt(x, y, x1, y1, x2, y2, colors):
         c0 = c1 = l
         t = 1
     else:
-        c0 = stdMath.floor(l*t)
+        c0 = math.floor(l*t)
         c1 = c0 if l == c0 else (c0 + 1)
     rgb0 = colors[c0]
     rgb1 = colors[c1]
@@ -335,6 +351,18 @@ def colorAt(x, y, x1, y1, x2, y2, colors):
     clamp((1-t)*((rgb0 >> 16) & 255) + t*((rgb1 >> 16) & 255)),
     clamp((1-t)*((rgb0 >> 8) & 255) + t*((rgb1 >> 8) & 255)),
     clamp((1-t)*((rgb0) & 255) + t*((rgb1) & 255))
+    ]
+
+def patternAt(x, y, pattern):
+    x = round(x) % pattern['width']
+    y = round(y) % pattern['height']
+    if 0 > x: x += pattern['width']
+    if 0 > y: y += pattern['height']
+    i = (x + y*pattern['width']) << 2
+    return [
+    pattern['image'][i + 0],
+    pattern['image'][i + 1],
+    pattern['image'][i + 2]
     ]
 
 def _chars():

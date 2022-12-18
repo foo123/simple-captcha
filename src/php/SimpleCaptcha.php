@@ -97,8 +97,8 @@ class SimpleCaptcha
 
         if (!is_array($color)) $color = array($color);
         if (!is_array($background)) $background = array($background);
-        $color = array_map(array($this, 'int'), $color);
-        $background = array_map(array($this, 'int'), $background);
+        if (!isset($color['image'])) $color = array_map(array($this, 'int'), $color);
+        if (!isset($background['image'])) $background = array_map(array($this, 'int'), $background);
 
         if ($max_num_terms > $num_terms)
         {
@@ -226,17 +226,17 @@ class SimpleCaptcha
         $wh = $w*$h;
 
         // img bitmap
-        $imgbmp = array_fill(0, $wh, 0);
+        $imgb = array_fill(0, $wh, 0);
         $img = imagecreatetruecolor($w, $h);
         $x1 = 0;
         $y1 = $h/2;
-        $x2 = $w-1;
+        $x2 = $w;
         $y2 = $h/2;
         for ($i=0,$x=0,$y=0; $i<$wh; ++$i,++$x)
         {
             if ($x >= $w) {$x = 0; ++$y;}
-            $c = $this->colorAt($x, $y, $x1, $y1, $x2, $y2, $background);
-            $imgbmp[$i] = (($c[0] << 16) | ($c[1] << 8) | ($c[2])) & 0xffffffff;
+            $imgb[$i] = 0;
+            $c = $this->colorAt($x, $y, $background, $x1, $y1, $x2, $y2);
             imagesetpixel($img, $x, $y, imagecolorallocate($img, $c[0], $c[1], $c[2]));        }
 
         // render chars
@@ -254,17 +254,7 @@ class SimpleCaptcha
                     $alpha = $charbmp[$x + $cw*$y];
                     if (0 < $alpha)
                     {
-                        $alpha = (float)$alpha / 255.0;
-                        $j = $x0+$x + $w*($y0+$y);
-                        $c = $imgbmp[$j];
-                        $r0 = ($c >> 16) & 255;
-                        $g0 = ($c >>> 8) & 255;
-                        $b0 = ($c) & 255;
-                        $c = $this->colorAt($x, $y, $x1, $y1, $x2, $y2, $color);
-                        $r = $c[0];
-                        $g = $c[1];
-                        $b = $c[2];
-                        $imgbmp[$j] = (($this->clamp($r0*(1-$alpha) + $alpha*$r) << 16) | ($this->clamp($g0*(1-$alpha) + $alpha*$g) << 8) | ($this->clamp($b0*(1-$alpha) + $alpha*$b))) & 0xffffffff;
+                        $imgb[$x0+$x + $w*($y0+$y)] = $alpha;
                     }
                 }
             }
@@ -286,14 +276,24 @@ class SimpleCaptcha
                         $sw = min($w, round($scale * $cw));
                         $sh = min($h, round($scale * $ch));
                         $y0 = max(0, round(($h - $sh) / 2));
+                        $x1 = 0;
+                        $y1 = $sh/2;
+                        $x2 = $sw;
+                        $y2 = $sh/2;
                         for ($ys=0; $ys<$sh; ++$ys)
                         {
                             $y = max(0, min($h-1, round(10 + $ys / $scale)));
                             for ($xs=0; $xs<$sw; ++$xs)
                             {
                                 $x = max(0, min($w-1, round(10 + $k*($cw+$space) + $xs / $scale)));
-                                $c = $imgbmp[$x + $y*$w];
-                                imagesetpixel($img, $x0+$xs, $y0+$ys, imagecolorallocate($img, $this->clamp(($c >> 16) & 255), $this->clamp(($c >> 8) & 255), $this->clamp($c & 255)));
+                                $alpha = $imgb[$x + $y*$w];
+                                if (0 < $alpha)
+                                {
+                                    $alpha /= 255.0;
+                                    $c = $this->colorAt($xs, $ys, $color, $x1, $y1, $x2, $y2);
+                                    $rgb = imagecolorat($img, $x0+$xs, $y0+$ys);
+                                    imagesetpixel($img, $x0+$xs, $y0+$ys, imagecolorallocate($img, $this->clamp((($rgb >> 16) & 255)*(1-$alpha) + $alpha*$c[0]), $this->clamp((($rgb >> 8) & 255)*(1-$alpha) + $alpha*$c[1]), $this->clamp((($rgb) & 255)*(1-$alpha) + $alpha*$c[2])));
+                                }
                             }
                         }
                         $x0 += $space + $sw;
@@ -304,6 +304,10 @@ class SimpleCaptcha
                     // create position-distorted GD image based on difficulty level
                     $phase = (float)mt_rand(0, 2) * 3.14 / 2.0;
                     $amplitude = is_array($distortion) && isset($distortion[(string)$difficulty]) ? (float)$distortion[(string)$difficulty] : (3 == $difficulty ? 5.0 : (2 == $difficulty ? 3.0 : 1.5));
+                    $x1 = 0;
+                    $y1 = $ch/2;
+                    $x2 = $cw;
+                    $y2 = $ch/2;
                     for ($y=0; $y<$h; ++$y)
                     {
                         $y0 = $y;
@@ -311,8 +315,16 @@ class SimpleCaptcha
                         {
                             $x0 = $x;
                             $y0 = max(0, min($h-1, round($y + $amplitude * sin($phase + 6.28 * 2 * $x / $w))));
-                            $c = $imgbmp[$x0 + $y0*$w];
-                            imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 255), $this->clamp(($c >> 8) & 255), $this->clamp($c & 255)));
+                            $alpha = $imgb[$x0 + $y0*$w];
+                            if (0 < $alpha)
+                            {
+                                $alpha /= 255.0;
+                                $xc = $x - 10 + $space - floor(($x - 10 + $space)/($cw + $space))*($cw + $space);
+                                $yc = $y - 10;
+                                $c = $this->colorAt($xc, $yc, $color, $x1, $y1, $x2, $y2);
+                                $rgb = imagecolorat($img, $x, $y);
+                                imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp((($rgb >> 16) & 255)*(1-$alpha) + $alpha*$c[0]), $this->clamp((($rgb >> 8) & 255)*(1-$alpha) + $alpha*$c[1]), $this->clamp((($rgb) & 255)*(1-$alpha) + $alpha*$c[2])));
+                            }
                         }
                     }
             }
@@ -320,25 +332,41 @@ class SimpleCaptcha
         else
         {
             // create non-distorted GD image
+            $x1 = 0;
+            $y1 = $ch/2;
+            $x2 = $cw;
+            $y2 = $ch/2;
             for ($y=0,$yw=0; $y<$h; ++$y,$yw+=$w)
             {
                 for ($x=0; $x<$w; ++$x)
                 {
-                    $c = $imgbmp[$x + $yw];
-                    imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp(($c >> 16) & 255), $this->clamp(($c >> 8) & 255), $this->clamp($c & 255)));
+                    $alpha = $imgb[$x + $yw];
+                    if (0 < $alpha)
+                    {
+                        $alpha /= 255.0;
+                        // x = x0 + i*cw + (i-1)*space + xc
+                        // xc = x - x0 + space - i*(cw + space)
+                        $xc = $x - 10 + $space - floor(($x - 10 + $space)/($cw + $space))*($cw + $space);
+                        $yc = $y - 10;
+                        $c = $this->colorAt($xc, $yc, $color, $x1, $y1, $x2, $y2);
+                        $rgb = imagecolorat($img, $x, $y);
+                        imagesetpixel($img, $x, $y, imagecolorallocate($img, $this->clamp((($rgb >> 16) & 255)*(1-$alpha) + $alpha*$c[0]), $this->clamp((($rgb >> 8) & 255)*(1-$alpha) + $alpha*$c[1]), $this->clamp((($rgb) & 255)*(1-$alpha) + $alpha*$c[2])));
+                    }
                 }
             }
         }
 
         // free memory
         $bitmaps = null;
-        $imgbmp = null;
+        $imgb = null;
 
         return $img;
     }
 
-    private function colorAt($x, $y, $x1, $y1, $x2, $y2, $colors)
+    private function colorAt($x, $y, $colors, $x1, $y1, $x2, $y2)
     {
+        if (!empty($colors['image']) && !empty($colors['width']) && !empty($colors['height']))
+            return $this->patternAt($x, $y, $colors);
         // linear gradient interpolation between colors
         $dx = $x2 - $x1;
         $dy = $y2 - $y1;
@@ -371,6 +399,20 @@ class SimpleCaptcha
         $this->clamp((1-$t)*(($rgb0 >> 16) & 255) + $t*(($rgb1 >> 16) & 255)),
         $this->clamp((1-$t)*(($rgb0 >> 8) & 255) + $t*(($rgb1 >> 8) & 255)),
         $this->clamp((1-$t)*(($rgb0) & 255) + $t*(($rgb1) & 255))
+        );
+    }
+
+    private function patternAt($x, $y, $pattern)
+    {
+        $x = round($x) % $pattern['width'];
+        $y = round($y) % $pattern['height'];
+        if (0 > $x) $x += $pattern['width'];
+        if (0 > $y) $y += $pattern['height'];
+        $i = ($x + $y*$pattern['width']) << 2;
+        return array(
+        $pattern['image'][$i + 0],
+        $pattern['image'][$i + 1],
+        $pattern['image'][$i + 2]
         );
     }
 
