@@ -3,7 +3,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.5.0
+*   @version 2.6.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -12,7 +12,7 @@ if (!class_exists('SimpleCaptcha', false))
 {
 class SimpleCaptcha
 {
-    const VERSION = '2.5.0';
+    const VERSION = '2.6.0';
 
     private $opts = null;
     private $captcha = null;
@@ -95,10 +95,10 @@ class SimpleCaptcha
         $color = $this->option('color');
         $background = $this->option('background');
 
-        if (!is_array($color)) $color = array($color);
-        if (!is_array($background)) $background = array($background);
-        if (!isset($color['image'])) $color = array_map(array($this, 'int'), $color);
-        if (!isset($background['image'])) $background = array_map(array($this, 'int'), $background);
+        if (!is_array($color) && !is_callable($color)) $color = array($color);
+        if (!is_array($background) && !is_callable($background)) $background = array($background);
+        if (is_array($color)) $color = array_map(array($this, 'int'), $color);
+        if (is_array($background)) $background = array_map(array($this, 'int'), $background);
 
         if ($max_num_terms > $num_terms)
         {
@@ -365,8 +365,8 @@ class SimpleCaptcha
 
     private function colorAt($x, $y, $colors, $x1, $y1, $x2, $y2)
     {
-        if (!empty($colors['image']) && !empty($colors['width']) && !empty($colors['height']))
-            return $this->patternAt($x, $y, $colors);
+        //if (!empty($colors['image']) && !empty($colors['width']) && !empty($colors['height'])) return $this->patternAt($x, $y, $colors);
+        if (is_callable($colors)) return call_user_func($colors, $x, $y);
         // linear gradient interpolation between colors
         $dx = $x2 - $x1;
         $dy = $y2 - $y1;
@@ -402,7 +402,7 @@ class SimpleCaptcha
         );
     }
 
-    private function patternAt($x, $y, $pattern)
+    /*private function patternAt($x, $y, $pattern)
     {
         $x = round($x) % $pattern['width'];
         $y = round($y) % $pattern['height'];
@@ -414,7 +414,7 @@ class SimpleCaptcha
         $pattern['image'][$i + 1],
         $pattern['image'][$i + 2]
         );
-    }
+    }*/
 
     public function int($x)
     {

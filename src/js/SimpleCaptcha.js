@@ -2,7 +2,7 @@
 *   SimpleCaptcha
 *   Simple image-based macthematical captcha
 *
-*   @version 2.5.0
+*   @version 2.6.0
 *   https://github.com/foo123/simple-captcha
 *
 **/
@@ -31,7 +31,7 @@ var HAS = Object.prototype.hasOwnProperty,
 
 class SimpleCaptcha
 {
-    static VERSION = '2.5.0';
+    static VERSION = '2.6.0';
 
     opts = null;
     captcha = null;
@@ -107,8 +107,8 @@ class SimpleCaptcha
             background = this.option('background'),
             formula, result, captcha, width, height
         ;
-        if (!is_array(color) && !is_object(color)) color = [color];
-        if (!is_array(background) && !is_object(background)) background = [background];
+        if (!is_array(color) && !is_callable(color)) color = [color];
+        if (!is_array(background) && !is_callable(background)) background = [background];
         if (is_array(color)) color = color.map(int);
         if (is_array(background)) background = background.map(int);
 
@@ -407,6 +407,11 @@ function is_object(x)
     return '[object Object]' === toString.call(x);
 }
 
+function is_callable(x)
+{
+    return 'function' === typeof x;
+}
+
 function int(x)
 {
     return parseInt(x);
@@ -487,8 +492,8 @@ async function imagepng(img, width, height, metaData)
 
 function colorAt(x, y, colors, x1, y1, x2, y2)
 {
-    if (colors.image && colors.width && colors.height)
-        return patternAt(x, y, colors);
+    //if (colors.image && colors.width && colors.height) return patternAt(x, y, colors);
+    if (is_callable(colors)) return colors(x, y);
     // linear gradient interpolation between colors
     var dx = x2 - x1, dy = y2 - y1,
         vert = 0 === dx, hor = 0 === dy, f = 2*dx*dy,
@@ -520,7 +525,7 @@ function colorAt(x, y, colors, x1, y1, x2, y2)
     ];
 }
 
-function patternAt(x, y, pattern)
+/*function patternAt(x, y, pattern)
 {
     x = stdMath.round(x) % pattern.width;
     y = stdMath.round(y) % pattern.height;
@@ -532,7 +537,7 @@ function patternAt(x, y, pattern)
     pattern.image[i + 1],
     pattern.image[i + 2]
     ];
-}
+}*/
 
 function _chars()
 {

@@ -2,11 +2,22 @@
 
 include(dirname(__FILE__).'/../../src/php/SimpleCaptcha.php');
 
-$tile = json_decode(file_get_contents(dirname(__FILE__).'/../tile.json'), true);
+//$tile = json_decode(file_get_contents(dirname(__FILE__).'/../tile.json'), true);
+$tile = imagecreatefromjpeg(dirname(__FILE__).'/../tile.jpg');
+$tile_width = imagesx($tile);
+$tile_height = imagesy($tile);
+$tile_pattern = function ($x, $y) use (&$tile, $tile_width, $tile_height) {
+    $x = $x % $tile_width;
+    $y = $y % $tile_height;
+    if (0 > $x) $x += $tile_width;
+    if (0 > $y) $y += $tile_height;
+    $rgb = imagecolorat($tile, $x, $y);
+    return array(($rgb >> 16) & 0xFF, ($rgb >> 8) & 0xFF, $rgb & 0xFF);
+};
 
 function test()
 {
-    global $tile;
+    global $tile_pattern;
 
     $captcha = (new SimpleCaptcha())
             ->option('secret_key', 'SECRET_KEY')
@@ -23,7 +34,7 @@ function test()
     $captcha->option('difficulty', 2); // 0 (easy) to 3 (difficult)
     $captcha->option('distortion_type', 1); // 1: position distortion
     $captcha->option('color', [0xff0000, 0xffff00, 0x0000ff, 0x00ff00]); // text color gradient
-    $captcha->option('background', /*0x1Da1C1*/$tile); // background color/pattern
+    $captcha->option('background', /*0x1Da1C1*/$tile_pattern); // background color/pattern
 
     echo $captcha->getCaptcha() . PHP_EOL;
     echo PHP_EOL;

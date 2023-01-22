@@ -23,6 +23,13 @@ else:
     pass
 
 tile = json.load(open(DIR+'/../tile.json'))
+def tile_pattern(x, y):
+    x = x % tile['width']
+    y = y % tile['height']
+    if 0 > x: x += tile['width']
+    if 0 > y: y += tile['height']
+    i = (x + y*tile['width']) << 2
+    return [tile['image'][i  ], tile['image'][i+1], tile['image'][i+2]]
 
 def test():
     # max_num_terms -1 means constant num_terms
@@ -32,7 +39,7 @@ def test():
     captcha.option('difficulty', 2) # difficulty 0 (easy) to 3 (difficult)
     captcha.option('distortion_type', 1) # 1: position distortion
     captcha.option('color', [0xff0000, 0xffff00, 0x0000ff, 0x00ff00]) # text color gradient
-    captcha.option('background', tile) # background color/pattern
+    captcha.option('background', tile_pattern) # background color/pattern
 
     print(captcha.getCaptcha())
     print("\n")

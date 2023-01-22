@@ -2,7 +2,7 @@
 #   SimpleCaptcha
 #   Simple image-based macthematical captcha
 #
-#   @version 2.5.0
+#   @version 2.6.0
 #   https://github.com/foo123/simple-captcha
 #
 ##
@@ -13,7 +13,7 @@ class SimpleCaptcha:
     SimpleCaptcha
     https://github.com/foo123/simple-captcha
     """
-    VERSION = '2.5.0'
+    VERSION = '2.6.0'
 
     def __init__(self):
         self.captcha = None
@@ -77,8 +77,8 @@ class SimpleCaptcha:
         color = self.option('color')
         background = self.option('background')
 
-        if (not isinstance(color, list)) and (not isinstance(color, dict)): color = [color]
-        if (not isinstance(background, list)) and (not isinstance(background, dict)): background = [background]
+        if (not isinstance(color, list)) and (not callable(color)): color = [color]
+        if (not isinstance(background, list)) and (not callable(background)): background = [background]
         if isinstance(color, list): color = list(map(lambda x: int(x), color))
         if isinstance(background, list): background = list(map(lambda x: int(x), background))
 
@@ -323,8 +323,8 @@ def imagepng(img, width, height, metaData=dict()):
     return 'data:image/png;base64,' + base64.b64encode(PNGPacker(metaData).toPNG(img, width, height)).decode("ascii")
 
 def colorAt(x, y, colors, x1, y1, x2, y2):
-    if isinstance(colors, dict) and ('image' in colors) and ('width' in colors) and ('height' in colors):
-        return patternAt(x, y, colors)
+    #if isinstance(colors, dict) and ('image' in colors) and ('width' in colors) and ('height' in colors): return patternAt(x, y, colors)
+    if callable(colors): return colors(x, y)
     # linear gradient interpolation between colors
     dx = x2 - x1
     dy = y2 - y1
@@ -353,17 +353,17 @@ def colorAt(x, y, colors, x1, y1, x2, y2):
     clamp((1-t)*((rgb0) & 255) + t*((rgb1) & 255))
     ]
 
-def patternAt(x, y, pattern):
-    x = round(x) % pattern['width']
-    y = round(y) % pattern['height']
-    if 0 > x: x += pattern['width']
-    if 0 > y: y += pattern['height']
-    i = (x + y*pattern['width']) << 2
-    return [
-    pattern['image'][i + 0],
-    pattern['image'][i + 1],
-    pattern['image'][i + 2]
-    ]
+#def patternAt(x, y, pattern):
+#    x = round(x) % pattern['width']
+#    y = round(y) % pattern['height']
+#    if 0 > x: x += pattern['width']
+#    if 0 > y: y += pattern['height']
+#    i = (x + y*pattern['width']) << 2
+#    return [
+#    pattern['image'][i + 0],
+#    pattern['image'][i + 1],
+#    pattern['image'][i + 2]
+#    ]
 
 def _chars():
     return {
